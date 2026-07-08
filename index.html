@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Chainsight — X.509 hierarchy analyzer</title>
+<style>
+  :root{
+    --bg:#F5F7FA; --panel:#FFFFFF; --ink:#1B2430; --muted:#69748A;
+    --line:#D9DFE8; --accent:#3B5BDB; --accent-soft:#EDF1FE;
+    --ok:#2B8A3E; --ok-soft:#E6F4EA; --warn:#B95C00; --warn-soft:#FFF1E0;
+    --bad:#C92A2A; --bad-soft:#FDECEC; --rail:#B9C3D4;
+    --mono:"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.45;padding:24px 16px 80px;}
+  .wrap{max-width:880px;margin:0 auto;}
+  header{margin-bottom:20px;}
+  header h1{font-family:var(--mono);font-size:22px;letter-spacing:-0.5px;}
+  header h1 .dim{color:var(--accent)}
+  header p{color:var(--muted);font-size:13.5px;margin-top:4px;max-width:60ch;}
+  header p b{color:var(--ink);font-weight:600}
+
+  .drop{border:1.5px dashed var(--rail);border-radius:10px;background:var(--panel);
+    padding:26px 18px;text-align:center;cursor:pointer;transition:border-color .15s,background .15s;}
+  .drop.hover{border-color:var(--accent);background:var(--accent-soft);}
+  .drop .big{font-size:15px;font-weight:600;}
+  .drop .sub{font-size:12.5px;color:var(--muted);margin-top:4px;font-family:var(--mono);}
+  .rowbtns{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;}
+  button{font:inherit;font-size:13px;padding:7px 14px;border-radius:7px;border:1px solid var(--line);
+    background:var(--panel);color:var(--ink);cursor:pointer;}
+  button:hover{border-color:var(--accent);color:var(--accent);}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff;}
+  button.primary:hover{opacity:.92;color:#fff}
+  button:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
+  textarea{width:100%;min-height:140px;margin-top:10px;font-family:var(--mono);font-size:12px;
+    border:1px solid var(--line);border-radius:8px;padding:10px;resize:vertical;display:none;background:var(--panel);color:var(--ink);}
+  textarea.show{display:block}
+  #fileinput{display:none}
+
+  .toast{margin-top:12px;font-size:13px;padding:10px 12px;border-radius:8px;display:none;}
+  .toast.err{display:block;background:var(--bad-soft);color:var(--bad);}
+  .toast.info{display:block;background:var(--accent-soft);color:var(--accent);}
+
+  .summary{display:flex;gap:16px;flex-wrap:wrap;margin:22px 0 6px;font-family:var(--mono);font-size:12.5px;color:var(--muted);}
+  .summary b{color:var(--ink);font-size:16px;display:block;font-weight:600;}
+
+  .forest{margin-top:14px;}
+  .grouphead{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
+    color:var(--muted);margin:26px 0 8px;}
+  .node{position:relative;}
+  .node .children{margin-left:22px;border-left:2px solid var(--rail);padding-left:18px;}
+  .link-note{font-family:var(--mono);font-size:11px;color:var(--muted);margin:6px 0 6px 2px;
+    display:flex;align-items:center;gap:6px;}
+  .link-note::before{content:"";display:inline-block;width:14px;height:2px;background:var(--rail);}
+  .link-note .v-ok{color:var(--ok);font-weight:600}
+  .link-note .v-dn{color:var(--warn);font-weight:600}
+
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
+    margin:6px 0 14px;box-shadow:0 1px 2px rgba(27,36,48,.05);}
+  .card .cn{font-family:var(--mono);font-size:14.5px;font-weight:600;word-break:break-word;}
+  .card .dn{font-family:var(--mono);font-size:11.5px;color:var(--muted);margin-top:2px;word-break:break-word;}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;}
+  .badge{font-family:var(--mono);font-size:10.5px;padding:2.5px 8px;border-radius:99px;border:1px solid transparent;}
+  .b-role{background:var(--accent-soft);color:var(--accent);}
+  .b-ok{background:var(--ok-soft);color:var(--ok);}
+  .b-warn{background:var(--warn-soft);color:var(--warn);}
+  .b-bad{background:var(--bad-soft);color:var(--bad);}
+  .b-dim{background:var(--bg);color:var(--muted);border-color:var(--line);}
+  .meta{display:grid;grid-template-columns:88px 1fr;gap:2px 10px;margin-top:10px;
+    font-size:12px;font-family:var(--mono);}
+  .meta dt{color:var(--muted);}
+  .meta dd{word-break:break-all;}
+  details.raw{margin-top:8px;}
+  details.raw summary{font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;}
+  .privacy{margin-top:34px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;}
+  @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>chainsight<span class="dim">://</span>x509</h1>
+    <p>Drop certificates and see how they connect. Chains are rebuilt from <b>AKI → SKI</b> key identifiers, issuer/subject names, and — where the browser supports the algorithm — <b>actual signature verification</b>. Everything runs locally; nothing is uploaded.</p>
+  </header>
+
+  <div class="drop" id="drop" role="button" tabindex="0" aria-label="Add certificate files">
+    <div class="big">Drop certificate files here</div>
+    <div class="sub">.pem .crt .cer .der — bundles with multiple certs are fine</div>
+    <div class="rowbtns" style="justify-content:center">
+      <button class="primary" id="browse">Choose files</button>
+      <button id="pastebtn">Paste PEM</button>
+      <button id="demobtn">Load demo chain</button>
+      <button id="clearbtn">Clear all</button>
+    </div>
+  </div>
+  <input type="file" id="fileinput" multiple accept=".pem,.crt,.cer,.der,.txt,.p7b">
+  <textarea id="pastearea" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----" aria-label="Paste PEM certificates"></textarea>
+  <div class="rowbtns"><button id="parsepaste" style="display:none" class="primary">Add pasted certs</button></div>
+  <div class="toast" id="toast"></div>
+
+  <div class="summary" id="summary" style="display:none">
+    <div><b id="s-total">0</b>certs loaded</div>
+    <div><b id="s-chains">0</b>chains</div>
+    <div><b id="s-verified">0</b>signatures verified</div>
+    <div><b id="s-issues">0</b>issues</div>
+  </div>
+
+  <div class="forest" id="forest"></div>
+
+  <p class="privacy">Client-side only: parsing and verification happen in this page via WebCrypto. Signature checks cover RSA (SHA-256/384/512) and ECDSA (P-256/P-384); other algorithms fall back to key-identifier / name matching, marked accordingly.</p>
+</div>
+
+<script>
+"use strict";
+/* ---------------- minimal DER / ASN.1 reader ---------------- */
+function derParse(buf, offset=0, end=buf.length){
+  const items=[];
+  let i=offset;
+  while(i<end){
+    const start=i;
+    const tag=buf[i++];
+    if(tag===undefined) break;
+    let len=buf[i++];
+    if(len & 0x80){
+      const n=len & 0x7f; len=0;
+      for(let k=0;k<n;k++) len=(len<<8)|buf[i++];
+    }
+    const contentStart=i, contentEnd=i+len;
+    const item={tag, start, contentStart, contentEnd, buf};
+    const constructed = !!(tag & 0x20);
+    if(constructed){ item.children = derParse(buf, contentStart, contentEnd); }
+    items.push(item);
+    i=contentEnd;
+  }
+  return items;
+}
+const slice=(it)=>it.buf.slice(it.start, it.contentEnd);           // full TLV
+const content=(it)=>it.buf.slice(it.contentStart, it.contentEnd);  // value only
+function oidStr(it){
+  const b=content(it); if(!b.length) return "";
+  const out=[Math.floor(b[0]/40), b[0]%40]; let v=0;
+  for(let i=1;i<b.length;i++){ v=(v<<7)|(b[i]&0x7f); if(!(b[i]&0x80)){out.push(v);v=0;} }
+  return out.join(".");
+}
+function derStr(it){
+  const b=content(it);
+  if(it.tag===0x1e){ // BMPString UTF-16BE
+    let s=""; for(let i=0;i<b.length;i+=2) s+=String.fromCharCode((b[i]<<8)|b[i+1]); return s;
+  }
+  try{ return new TextDecoder().decode(b); }catch(e){ return hex(b); }
+}
+function hex(b, sep=""){ return Array.from(b).map(x=>x.toString(16).padStart(2,"0")).join(sep); }
+function derTime(it){
+  const s=derStr(it); let y,rest;
+  if(it.tag===0x17){ // UTCTime YYMMDD...
+    y=parseInt(s.slice(0,2),10); y+= (y<50)?2000:1900; rest=s.slice(2);
+  } else { y=parseInt(s.slice(0,4),10); rest=s.slice(4); }
+  return new Date(Date.UTC(y,parseInt(rest.slice(0,2))-1,parseInt(rest.slice(2,4)),
+    parseInt(rest.slice(4,6))||0,parseInt(rest.slice(6,8))||0,parseInt(rest.slice(8,10))||0));
+}
+const DN_OIDS={"2.5.4.3":"CN","2.5.4.10":"O","2.5.4.11":"OU","2.5.4.6":"C","2.5.4.7":"L","2.5.4.8":"ST","2.5.4.5":"serialNumber","1.2.840.113549.1.9.1":"E","2.5.4.4":"SN","2.5.4.42":"GN","0.9.2342.19200300.100.1.25":"DC"};
+function parseName(nameItem){
+  const parts=[], map={};
+  for(const rdnSet of (nameItem.children||[])){
+    for(const atv of (rdnSet.children||[])){
+      const oid=oidStr(atv.children[0]); const val=derStr(atv.children[1]);
+      const key=DN_OIDS[oid]||oid; parts.push(key+"="+val); map[key]=val;
+    }
+  }
+  return {str:parts.join(", "), map};
+}
+const SIGALGS={
+ "1.2.840.113549.1.1.5":{kind:"RSA",hash:"SHA-1",label:"sha1WithRSA"},
+ "1.2.840.113549.1.1.11":{kind:"RSA",hash:"SHA-256",label:"sha256WithRSA"},
+ "1.2.840.113549.1.1.12":{kind:"RSA",hash:"SHA-384",label:"sha384WithRSA"},
+ "1.2.840.113549.1.1.13":{kind:"RSA",hash:"SHA-512",label:"sha512WithRSA"},
+ "1.2.840.10045.4.3.2":{kind:"EC",hash:"SHA-256",label:"ecdsa-with-SHA256"},
+ "1.2.840.10045.4.3.3":{kind:"EC",hash:"SHA-384",label:"ecdsa-with-SHA384"},
+ "1.2.840.10045.4.3.4":{kind:"EC",hash:"SHA-512",label:"ecdsa-with-SHA512"},
+ "1.2.840.113549.1.1.10":{kind:"RSA-PSS",label:"RSASSA-PSS"},
+ "1.3.101.112":{kind:"Ed25519",label:"Ed25519"}
+};
+const CURVES={"1.2.840.10045.3.1.7":"P-256","1.3.132.0.34":"P-384","1.3.132.0.35":"P-521"};
+
+function parseCert(bytes, sourceName){
+  const root=derParse(bytes)[0];
+  if(!root || root.tag!==0x30 || !root.children || root.children.length<3)
+    throw new Error("not a DER certificate");
+  const [tbs, sigAlgSeq, sigBits]=root.children;
+  const c={sourceName, raw:bytes, tbsBytes:slice(tbs)};
+
+  // signature algorithm + value
+  c.sigAlgOid=oidStr(sigAlgSeq.children[0]);
+  c.sigAlg=SIGALGS[c.sigAlgOid]||{kind:"?",label:c.sigAlgOid};
+  const sb=content(sigBits); c.sigValue=sb.slice(1); // skip unused-bits byte
+
+  // tbs fields
+  let idx=0; const ch=tbs.children;
+  if(ch[0].tag===0xa0){ c.version=(content(ch[0].children[0])[0]||0)+1; idx=1; } else c.version=1;
+  c.serial=hex(content(ch[idx++]),":");
+  idx++; // inner sig alg
+  c.issuer=parseName(ch[idx++]);
+  const val=ch[idx++]; c.notBefore=derTime(val.children[0]); c.notAfter=derTime(val.children[1]);
+  c.subject=parseName(ch[idx++]);
+  const spki=ch[idx++]; c.spkiBytes=slice(spki);
+  // key info
+  const keyAlgOid=oidStr(spki.children[0].children[0]);
+  if(keyAlgOid==="1.2.840.113549.1.1.1"){
+    const kb=content(spki.children[1]);
+    const rsa=derParse(kb.slice(1))[0]; // skip unused bits
+    let modLen=(rsa.children[0].contentEnd-rsa.children[0].contentStart);
+    if(rsa.children[0].buf[rsa.children[0].contentStart]===0) modLen--;
+    c.keyInfo="RSA "+(modLen*8)+"-bit"; c.keyKind="RSA";
+  } else if(keyAlgOid==="1.2.840.10045.2.1"){
+    const curve=CURVES[oidStr(spki.children[0].children[1])]||"EC";
+    c.keyInfo="ECDSA "+curve; c.keyKind="EC"; c.curve=curve;
+  } else if(keyAlgOid==="1.3.101.112"){ c.keyInfo="Ed25519"; c.keyKind="Ed25519"; }
+  else c.keyInfo=keyAlgOid;
+
+  // extensions
+  c.isCA=false;
+  for(let j=idx;j<ch.length;j++){
+    if(ch[j].tag===0xa3){
+      for(const ext of ch[j].children[0].children){
+        const eoid=oidStr(ext.children[0]);
+        const last=ext.children[ext.children.length-1]; // OCTET STRING
+        const inner=derParse(content(last));
+        if(eoid==="2.5.29.14"){ c.ski=hex(content(inner[0])); }
+        else if(eoid==="2.5.29.35"){
+          for(const p of (inner[0].children||[])) if(p.tag===0x80) c.aki=hex(content(p));
+        }
+        else if(eoid==="2.5.29.19"){
+          const bc=inner[0];
+          if(bc.children && bc.children.length && bc.children[0].tag===0x01)
+            c.isCA=content(bc.children[0])[0]!==0;
+        }
+      }
+    }
+  }
+  c.selfIssued = c.subject.str===c.issuer.str;
+  c.id=c.serial+"|"+c.subject.str;
+  return c;
+}
+
+/* ---------------- signature verification (WebCrypto) ---------------- */
+function ecDerSigToRaw(der, size){
+  const seq=derParse(der)[0];
+  const pad=(b)=>{ let x=b; while(x.length && x[0]===0) x=x.slice(1);
+    const out=new Uint8Array(size); out.set(x, size-x.length); return out; };
+  const r=pad(content(seq.children[0])), s=pad(content(seq.children[1]));
+  const raw=new Uint8Array(size*2); raw.set(r,0); raw.set(s,size); return raw;
+}
+async function verifySig(child, issuer){
+  try{
+    const alg=child.sigAlg;
+    if(alg.kind==="RSA" && alg.hash && alg.hash!=="SHA-1"){
+      const key=await crypto.subtle.importKey("spki", issuer.spkiBytes,
+        {name:"RSASSA-PKCS1-v1_5", hash:alg.hash}, false, ["verify"]);
+      return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, child.sigValue, child.tbsBytes)
+        ? "ok" : "fail";
+    }
+    if(alg.kind==="EC" && issuer.curve && issuer.curve!=="P-521"){
+      const size=issuer.curve==="P-256"?32:48;
+      const key=await crypto.subtle.importKey("spki", issuer.spkiBytes,
+        {name:"ECDSA", namedCurve:issuer.curve}, false, ["verify"]);
+      const raw=ecDerSigToRaw(child.sigValue, size);
+      return await crypto.subtle.verify({name:"ECDSA", hash:alg.hash}, key, raw, child.tbsBytes)
+        ? "ok" : "fail";
+    }
+    return "unsupported";
+  }catch(e){ return "unsupported"; }
+}
+
+/* ---------------- chain building ---------------- */
+const certs=[]; const seen=new Set();
+
+function findIssuer(c){
+  // prefer AKI->SKI
+  if(c.aki){
+    const m=certs.filter(x=>x.ski===c.aki && x!==c);
+    if(m.length) return {parent:m[0], how:"AKI ⇒ SKI"};
+  }
+  const m=certs.filter(x=>x.subject.str===c.issuer.str && x!==c);
+  if(m.length) return {parent:m[0], how:"issuer DN = subject DN"};
+  return null;
+}
+
+async function buildForest(){
+  const links=new Map(); // childId -> {parent, how, verify}
+  for(const c of certs){
+    if(c.selfIssued && (!c.aki || c.aki===c.ski)) continue; // self-signed root
+    const f=findIssuer(c);
+    if(f){
+      const verify=await verifySig(c, f.parent);
+      links.set(c.id, {...f, verify});
+    }
+  }
+  // roots: self-signed, or no parent found
+  const hasParent=id=>links.has(id);
+  const roots=certs.filter(c=>!hasParent(c.id) && (c.selfIssued||c.isCA||true)).filter(c=>!hasParent(c.id));
+  const childrenOf=p=>certs.filter(c=>links.get(c.id)?.parent===p);
+  return {links, roots:roots.filter(c=>!links.has(c.id)), childrenOf};
+}
+
+/* ---------------- rendering ---------------- */
+const $=id=>document.getElementById(id);
+function esc(s){ return (s||"").replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m])); }
+function fmtDate(d){ return d.toISOString().slice(0,10); }
+
+function roleOf(c, childrenCount){
+  if(c.selfIssued && c.isCA) return "ROOT CA";
+  if(c.isCA) return "INTERMEDIATE CA";
+  return "LEAF";
+}
+function cardHTML(c, childrenCount){
+  const now=new Date(), soon=new Date(Date.now()+30*864e5);
+  const badges=[`<span class="badge b-role">${roleOf(c,childrenCount)}</span>`];
+  if(c.selfIssued) badges.push(`<span class="badge b-dim">self-signed</span>`);
+  if(c.notAfter<now) badges.push(`<span class="badge b-bad">EXPIRED ${fmtDate(c.notAfter)}</span>`);
+  else if(c.notAfter<soon) badges.push(`<span class="badge b-warn">expires ${fmtDate(c.notAfter)}</span>`);
+  if(c.sigAlg.hash==="SHA-1") badges.push(`<span class="badge b-warn">SHA-1 signature</span>`);
+  if(c.keyKind==="RSA" && /RSA (512|768|1024)-/.test(c.keyInfo)) badges.push(`<span class="badge b-warn">weak key</span>`);
+  const cn=c.subject.map.CN||c.subject.map.O||c.subject.str||"(no subject)";
+  return `<div class="card">
+    <div class="cn">${esc(cn)}</div>
+    <div class="dn">${esc(c.subject.str)}</div>
+    <div class="badges">${badges.join("")}</div>
+    <dl class="meta">
+      <dt>issuer</dt><dd>${esc(c.issuer.map.CN||c.issuer.str)}</dd>
+      <dt>validity</dt><dd>${fmtDate(c.notBefore)} → ${fmtDate(c.notAfter)}</dd>
+      <dt>key</dt><dd>${esc(c.keyInfo)} · ${esc(c.sigAlg.label)}</dd>
+      <dt>serial</dt><dd>${esc(c.serial)}</dd>
+      ${c.ski?`<dt>SKI</dt><dd>${c.ski}</dd>`:""}
+      ${c.aki?`<dt>AKI</dt><dd>${c.aki}</dd>`:""}
+      <dt>source</dt><dd>${esc(c.sourceName)}</dd>
+    </dl>
+  </div>`;
+}
+function linkNoteHTML(link){
+  if(!link) return "";
+  let v;
+  if(link.verify==="ok") v=`<span class="v-ok">✓ signature verified</span>`;
+  else if(link.verify==="fail") v=`<span class="v-dn" style="color:var(--bad)">✗ SIGNATURE INVALID</span>`;
+  else v=`<span class="v-dn">matched by name only (alg not verifiable in browser)</span>`;
+  return `<div class="link-note">${esc(link.how)} · ${v}</div>`;
+}
+function renderNode(c, forest, links){
+  const kids=forest.childrenOf(c);
+  let html=`<div class="node">${linkNoteHTML(links.get(c.id))}${cardHTML(c,kids.length)}`;
+  if(kids.length){
+    html+=`<div class="children">`+kids.map(k=>renderNode(k,forest,links)).join("")+`</div>`;
+  }
+  return html+`</div>`;
+}
+
+async function render(){
+  const forest=await buildForest();
+  const {links}=forest;
+  const el=$("forest"); el.innerHTML="";
+  if(!certs.length){ $("summary").style.display="none"; return; }
+
+  const trueRoots=forest.roots.filter(c=>c.selfIssued);
+  const orphans=forest.roots.filter(c=>!c.selfIssued);
+  let html="";
+  if(trueRoots.length){
+    html+=`<div class="grouphead">Trust anchors (${trueRoots.length})</div>`;
+    html+=trueRoots.map(r=>renderNode(r,forest,links)).join("");
+  }
+  if(orphans.length){
+    html+=`<div class="grouphead">Incomplete chains — issuer not loaded (${orphans.length})</div>`;
+    html+=orphans.map(o=>{
+      const want=o.issuer.map.CN||o.issuer.str;
+      return `<div class="link-note">missing issuer: <b>${esc(want)}</b>${o.aki?` (AKI ${o.aki.slice(0,16)}…)`:""}</div>`
+        + renderNode(o,forest,links);
+    }).join("");
+  }
+  el.innerHTML=html;
+
+  let verified=0, issues=0; const now=new Date();
+  for(const l of links.values()){ if(l.verify==="ok") verified++; if(l.verify==="fail") issues++; }
+  for(const c of certs){ if(c.notAfter<now) issues++; }
+  issues+=orphans.length;
+  $("s-total").textContent=certs.length;
+  $("s-chains").textContent=trueRoots.length+orphans.length;
+  $("s-verified").textContent=verified;
+  $("s-issues").textContent=issues;
+  $("summary").style.display="flex";
+}
+
+/* ---------------- input handling ---------------- */
+function toast(msg, cls){ const t=$("toast"); t.textContent=msg; t.className="toast "+cls;
+  if(cls==="info") setTimeout(()=>{ if(t.textContent===msg) t.className="toast"; }, 4000); }
+
+function addCertBytes(bytes, name){
+  try{
+    const c=parseCert(bytes, name);
+    if(seen.has(c.id)) return 0;
+    seen.add(c.id); certs.push(c); return 1;
+  }catch(e){ return -1; }
+}
+function pemBlocks(text){
+  const out=[]; const re=/-----BEGIN (?:TRUSTED )?CERTIFICATE-----([\s\S]*?)-----END (?:TRUSTED )?CERTIFICATE-----/g;
+  let m; while((m=re.exec(text))){
+    const b64=m[1].replace(/[^A-Za-z0-9+/=]/g,"");
+    const bin=atob(b64); const u=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+    out.push(u);
+  }
+  return out;
+}
+async function ingestFile(file){
+  const buf=new Uint8Array(await file.arrayBuffer());
+  let added=0, failed=0;
+  const asText=new TextDecoder("utf-8",{fatal:false}).decode(buf);
+  const blocks=asText.includes("BEGIN") ? pemBlocks(asText) : [];
+  if(blocks.length){
+    for(const b of blocks){ const r=addCertBytes(b,file.name); if(r>0)added++; if(r<0)failed++; }
+  } else if(buf[0]===0x30){
+    const r=addCertBytes(buf,file.name); if(r>0)added++; if(r<0)failed++;
+  } else failed++;
+  return {added,failed};
+}
+async function handleFiles(files){
+  let added=0, failed=0;
+  for(const f of files){ const r=await ingestFile(f); added+=r.added; failed+=r.failed; }
+  if(failed && !added) toast("Couldn't parse any certificates from that input.","err");
+  else if(added) toast(`Added ${added} certificate${added>1?"s":""}${failed?`, ${failed} unparseable`:""}.`,"info");
+  else toast("No new certificates (duplicates skipped).","info");
+  await render();
+}
+
+const drop=$("drop");
+drop.addEventListener("click",e=>{ if(e.target.tagName!=="BUTTON") $("fileinput").click(); });
+drop.addEventListener("keydown",e=>{ if(e.key==="Enter"||e.key===" "){e.preventDefault();$("fileinput").click();} });
+$("browse").addEventListener("click",()=>$("fileinput").click());
+$("fileinput").addEventListener("change",e=>handleFiles([...e.target.files]));
+["dragover","dragenter"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("hover");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("hover");}));
+drop.addEventListener("drop",e=>handleFiles([...e.dataTransfer.files]));
+$("pastebtn").addEventListener("click",()=>{
+  $("pastearea").classList.toggle("show");
+  $("parsepaste").style.display=$("pastearea").classList.contains("show")?"inline-block":"none";
+});
+$("parsepaste").addEventListener("click",async()=>{
+  const blocks=pemBlocks($("pastearea").value);
+  if(!blocks.length){ toast("No PEM CERTIFICATE blocks found in the pasted text.","err"); return; }
+  let added=0; for(const b of blocks) if(addCertBytes(b,"pasted")>0) added++;
+  toast(`Added ${added} certificate${added===1?"":"s"} from paste.`,"info");
+  $("pastearea").value=""; await render();
+});
+$("clearbtn").addEventListener("click",async()=>{ certs.length=0; seen.clear(); await render(); toast("Cleared.","info"); });
+
+/* ---------------- demo chain: generate a 3-tier PKI in-browser ---------------- */
+$("demobtn").addEventListener("click", async ()=>{
+  toast("Generating demo Root → Intermediate → Leaf chain with WebCrypto…","info");
+  try{
+    const chain=await makeDemoChain();
+    for(const [bytes,name] of chain) addCertBytes(bytes,name);
+    await render();
+    toast("Demo chain loaded — signatures generated and verified locally.","info");
+  }catch(e){ toast("Demo generation failed: "+e.message,"err"); }
+});
+
+/* Minimal DER writer to self-issue demo certs */
+function derLen(n){ if(n<128) return [n];
+  const b=[]; while(n){b.unshift(n&255);n>>=8;} return [0x80|b.length,...b]; }
+function tlv(tag,body){ return new Uint8Array([tag,...derLen(body.length),...body]); }
+const cat=(...a)=>{ const n=a.reduce((s,x)=>s+x.length,0); const o=new Uint8Array(n);
+  let i=0; for(const x of a){o.set(x,i);i+=x.length;} return o; };
+function derOID(s){ const p=s.split(".").map(Number); const b=[p[0]*40+p[1]];
+  for(let i=2;i<p.length;i++){ let v=p[i],st=[v&0x7f]; v>>=7;
+    while(v){st.unshift(0x80|(v&0x7f));v>>=7;} b.push(...st);} return tlv(6,b); }
+function derUTF8(s){ return tlv(0x0c,[...new TextEncoder().encode(s)]); }
+function derName(cn,o){ return tlv(0x30,[...tlv(0x31,[...tlv(0x30,[...derOID("2.5.4.10"),...derUTF8(o)])]),
+  ...tlv(0x31,[...tlv(0x30,[...derOID("2.5.4.3"),...derUTF8(cn)])])]); }
+function derTimeEnc(d){ const s=d.toISOString().replace(/[-:T]/g,"").slice(2,14)+"Z"; return tlv(0x17,[...new TextEncoder().encode(s)]); }
+async function makeDemoChain(){
+  const mk=()=>crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
+  const rootK=await mk(), intK=await mk(), leafK=await mk();
+  const spki=async k=>new Uint8Array(await crypto.subtle.exportKey("spki",k.publicKey));
+  const sigAlg=tlv(0x30,[...derOID("1.2.840.10045.4.3.2")]);
+  const rawToDer=(raw)=>{ const enc=(b)=>{ let x=b; while(x.length>1&&x[0]===0)x=x.slice(1);
+      if(x[0]&0x80) x=new Uint8Array([0,...x]); return tlv(2,[...x]); };
+    return tlv(0x30,[...enc(raw.slice(0,32)),...enc(raw.slice(32))]); };
+  let serial=1;
+  async function issue(subjCN,subjO,subjKey,issuerCN,issuerO,issuerKey,isCA,skiByte,akiByte){
+    const exts=[];
+    exts.push(tlv(0x30,[...derOID("2.5.29.19"),...tlv(4,[...tlv(0x30,isCA?[...tlv(1,[255])]:[])])]));
+    exts.push(tlv(0x30,[...derOID("2.5.29.14"),...tlv(4,[...tlv(4,new Array(20).fill(skiByte))])]));
+    if(akiByte!==null) exts.push(tlv(0x30,[...derOID("2.5.29.35"),
+      ...tlv(4,[...tlv(0x30,[...tlv(0x80,new Array(20).fill(akiByte))])])]));
+    const now=new Date(), later=new Date(Date.now()+365*864e5);
+    const tbs=tlv(0x30,[
+      ...tlv(0xa0,[...tlv(2,[2])]), ...tlv(2,[serial++]), ...sigAlg,
+      ...derName(issuerCN,issuerO),
+      ...tlv(0x30,[...derTimeEnc(now),...derTimeEnc(later)]),
+      ...derName(subjCN,subjO), ...(await spki(subjKey)),
+      ...tlv(0xa3,[...tlv(0x30,exts.reduce((a,e)=>[...a,...e],[]))])
+    ]);
+    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},issuerKey.privateKey,tbs));
+    const sig=rawToDer(raw);
+    return tlv(0x30,[...tbs,...sigAlg,...tlv(3,[0,...sig])]);
+  }
+  const root=await issue("Demo Root CA","Chainsight Demo",rootK,"Demo Root CA","Chainsight Demo",rootK,true,0xAA,null);
+  const inter=await issue("Demo Issuing CA","Chainsight Demo",intK,"Demo Root CA","Chainsight Demo",rootK,true,0xBB,0xAA);
+  const leaf=await issue("device-0042.demo.local","Chainsight Demo",leafK,"Demo Issuing CA","Chainsight Demo",intK,false,0xCC,0xBB);
+  return [[root,"demo"],[inter,"demo"],[leaf,"demo"]];
+}
+</script>
+</body>
+</html>

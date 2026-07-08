@@ -12,6 +12,7 @@ leaves the browser.
 | `roots.pem` | Mozilla root store snapshot (~120 certs, via curl.se) |
 | `intermediates.pem` | Mozilla/CCADB intermediate preload list (~1800 certs) |
 | `Makefile` | Dev/deploy helpers; `refresh-cas` regenerates the two .pem files |
+| `tools/fetch-chain.mjs` | CLI: fetch a (m)TLS server's chain, save CA/intermediates as PEM (see tools/README.md) |
 
 The .pem data files are optional: the app runs without them; only the
 "Match public CAs" button needs them, fetched same-origin (CCADB and

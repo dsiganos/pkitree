@@ -74,6 +74,10 @@
   .meta dd{word-break:break-all;}
   details.raw{margin-top:8px;}
   details.raw summary{font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;}
+  details.raw summary:hover{color:var(--accent);}
+  .meta.fullmeta{grid-template-columns:150px 1fr;margin-top:8px;}
+  details.raw pre{font-family:var(--mono);font-size:10.5px;line-height:1.35;background:var(--bg);
+    border:1px solid var(--line);border-radius:6px;padding:8px;margin-top:8px;overflow-x:auto;user-select:all;}
   .privacy{margin-top:14px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;}
   .legend{margin-top:34px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;font-size:13px;}
   .legend h2{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
@@ -240,13 +244,16 @@ function parseCert(bytes, sourceName){
   else c.keyInfo=keyAlgOid;
 
   // extensions
-  c.isCA=false;
+  c.isCA=false; c.extList=[];
   for(let j=idx;j<ch.length;j++){
     if(ch[j].tag===0xa3){
       for(const ext of ch[j].children[0].children){
         const eoid=oidStr(ext.children[0]);
+        const critical=ext.children.length>2 && content(ext.children[1])[0]!==0;
         const last=ext.children[ext.children.length-1]; // OCTET STRING
-        const inner=derParse(content(last));
+        const rawExt=content(last);
+        const inner=derParse(rawExt);
+        c.extList.push({oid:eoid, critical, inner, raw:rawExt});
         if(eoid==="2.5.29.14"){ c.ski=hex(content(inner[0])); }
         else if(eoid==="2.5.29.35"){
           for(const p of (inner[0].children||[])) if(p.tag===0x80) c.aki=hex(content(p));
@@ -329,6 +336,71 @@ const $=id=>document.getElementById(id);
 function esc(s){ return (s||"").replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[m])); }
 function fmtDate(d){ return d.toISOString().slice(0,10); }
 
+/* ---------------- full-details view ---------------- */
+const EXT_NAMES={"2.5.29.19":"basic constraints","2.5.29.14":"subject key id","2.5.29.35":"authority key id",
+ "2.5.29.15":"key usage","2.5.29.37":"extended key usage","2.5.29.17":"subject alt name",
+ "2.5.29.31":"CRL distribution","1.3.6.1.5.5.7.1.1":"authority info access","2.5.29.32":"cert policies",
+ "1.3.6.1.4.1.11129.2.4.2":"SCT list","2.5.29.18":"issuer alt name"};
+const EKU_NAMES={"1.3.6.1.5.5.7.3.1":"serverAuth","1.3.6.1.5.5.7.3.2":"clientAuth","1.3.6.1.5.5.7.3.3":"codeSigning",
+ "1.3.6.1.5.5.7.3.4":"emailProtection","1.3.6.1.5.5.7.3.8":"timeStamping","1.3.6.1.5.5.7.3.9":"OCSPSigning"};
+const KU_BITS=["digitalSignature","nonRepudiation","keyEncipherment","dataEncipherment","keyAgreement",
+ "keyCertSign","cRLSign","encipherOnly","decipherOnly"];
+function extValue(oid, inner, raw){
+  const txt=b=>new TextDecoder().decode(b);
+  try{
+    switch(oid){
+      case "2.5.29.19":{ let ca=false,plen=null;
+        for(const x of inner[0].children||[]){ if(x.tag===1) ca=content(x)[0]!==0; if(x.tag===2) plen=content(x)[0]; }
+        return "CA:"+(ca?"TRUE":"FALSE")+(plen!==null?", pathlen:"+plen:""); }
+      case "2.5.29.14": return hex(content(inner[0]),":");
+      case "2.5.29.35":{ const p=(inner[0].children||[]).find(x=>x.tag===0x80);
+        return p?hex(content(p),":"):hex(raw,":"); }
+      case "2.5.29.15":{ const b=content(inner[0]); const bits=[];
+        for(let i=1;i<b.length;i++) for(let j=7;j>=0;j--)
+          if(b[i]&(1<<j)) bits.push(KU_BITS[(i-1)*8+(7-j)]||"bit"+((i-1)*8+(7-j)));
+        return bits.join(", "); }
+      case "2.5.29.37": return (inner[0].children||[]).map(x=>EKU_NAMES[oidStr(x)]||oidStr(x)).join(", ");
+      case "2.5.29.17": case "2.5.29.18": return (inner[0].children||[]).map(x=>{
+          const v=content(x);
+          if(x.tag===0x82) return "DNS:"+txt(v);
+          if(x.tag===0x81) return "email:"+txt(v);
+          if(x.tag===0x86) return "URI:"+txt(v);
+          if(x.tag===0x87) return "IP:"+(v.length===4?[...v].join("."):hex(v,":"));
+          return "(other)";
+        }).join(", ");
+      case "1.3.6.1.5.5.7.1.1": return (inner[0].children||[]).map(ad=>
+          (oidStr(ad.children[0])==="1.3.6.1.5.5.7.48.2"?"caIssuers ":"OCSP ")+txt(content(ad.children[1]))).join(", ");
+      case "2.5.29.31":{ const uris=[];
+        (function walk(items){ for(const x of items||[]){ if(x.tag===0x86) uris.push(txt(content(x))); walk(x.children); } })(inner);
+        if(uris.length) return uris.join(", "); break; }
+    }
+  }catch(e){}
+  const h=hex(raw); return h.length>64?h.slice(0,64)+"…":h; // undecoded: show hex
+}
+function toPemStr(bytes){
+  let s=""; for(let i=0;i<bytes.length;i+=0x8000) s+=String.fromCharCode.apply(null,bytes.subarray(i,i+0x8000));
+  return "-----BEGIN CERTIFICATE-----\n"+btoa(s).replace(/(.{64})/g,"$1\n").trimEnd()+"\n-----END CERTIFICATE-----";
+}
+function fullDetailsHTML(c){
+  const extRows=(c.extList||[]).map(e=>
+    `<dt>${esc(EXT_NAMES[e.oid]||e.oid)}${e.critical?" (critical)":""}</dt><dd>${esc(extValue(e.oid,e.inner,e.raw))}</dd>`).join("");
+  return `<details class="raw"><summary>full details</summary>
+    <dl class="meta fullmeta">
+      <dt>version</dt><dd>v${c.version}</dd>
+      <dt>serial</dt><dd>${esc(c.serial)}</dd>
+      <dt>signature alg</dt><dd>${esc(c.sigAlg.label)} (${esc(c.sigAlgOid)})</dd>
+      <dt>subject</dt><dd>${esc(c.subject.str)}</dd>
+      <dt>issuer</dt><dd>${esc(c.issuer.str)}</dd>
+      <dt>not before</dt><dd>${c.notBefore.toISOString()}</dd>
+      <dt>not after</dt><dd>${c.notAfter.toISOString()}</dd>
+      <dt>public key</dt><dd>${esc(c.keyInfo)}</dd>
+      ${c.fp256?`<dt>SHA-256</dt><dd>${c.fp256}</dd>`:""}
+      ${extRows}
+    </dl>
+    <pre>${toPemStr(c.raw)}</pre>
+  </details>`;
+}
+
 function roleOf(c, childrenCount){
   if(c.selfIssued && c.isCA) return "ROOT CA";
   if(c.isCA) return "INTERMEDIATE CA";
@@ -358,6 +430,7 @@ function cardHTML(c, childrenCount){
       ${c.aki?`<dt>AKI</dt><dd>${c.aki}</dd>`:""}
       <dt>source</dt><dd>${(c.sourceNames||[c.sourceName]).map(n=>`<span class="badge b-ok">${esc(n)}</span>`).join(" ")}</dd>
     </dl>
+    ${fullDetailsHTML(c)}
   </div>`;
 }
 function linkNoteHTML(link){
@@ -378,6 +451,8 @@ function renderNode(c, forest, links){
 }
 
 async function render(){
+  for(const c of certs) if(!c.fp256)
+    c.fp256=hex(new Uint8Array(await crypto.subtle.digest("SHA-256",c.raw)),":");
   const forest=await buildForest();
   const {links}=forest;
   const el=$("forest"); el.innerHTML="";

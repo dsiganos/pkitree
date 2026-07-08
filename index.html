@@ -304,13 +304,16 @@ async function verifySig(child, issuer){
 const certs=[]; const seen=new Set();
 
 function findIssuer(c){
+  // among cross-signed variants, prefer the self-signed one (the modern
+  // trust anchor) so tree shape doesn't depend on load order
+  const pick=m=>m.sort((a,b)=>(b.selfIssued?1:0)-(a.selfIssued?1:0))[0];
   // prefer AKI->SKI
   if(c.aki){
     const m=certs.filter(x=>x.ski===c.aki && x!==c);
-    if(m.length) return {parent:m[0], how:"AKI ⇒ SKI"};
+    if(m.length) return {parent:pick(m), how:"AKI ⇒ SKI"};
   }
   const m=certs.filter(x=>x.subject.str===c.issuer.str && x!==c);
-  if(m.length) return {parent:m[0], how:"issuer DN = subject DN"};
+  if(m.length) return {parent:pick(m), how:"issuer DN = subject DN"};
   return null;
 }
 
@@ -416,6 +419,8 @@ function cardHTML(c, childrenCount){
   if(c.keyKind==="RSA" && /RSA (512|768|1024)-/.test(c.keyInfo)) badges.push(`<span class="badge b-warn">weak key</span>`);
   const km=c.pubId && keys.find(k=>k.pubId===c.pubId);
   if(km) badges.push(`<span class="badge b-ok">private key: ${esc(km.names.join(", "))}</span>`);
+  const sibs=certs.filter(x=>x.pubId===c.pubId && x!==c); // same key, different cert = cross-signed
+  if(sibs.length) badges.push(`<span class="badge b-role">cross-signed</span>`);
   const cn=c.subject.map.CN||c.subject.map.O||c.subject.str||"(no subject)";
   return `<div class="card">
     <div class="cn">${esc(cn)}</div>
@@ -428,6 +433,7 @@ function cardHTML(c, childrenCount){
       <dt>serial</dt><dd>${esc(c.serial)}</dd>
       ${c.ski?`<dt>SKI</dt><dd>${c.ski}</dd>`:""}
       ${c.aki?`<dt>AKI</dt><dd>${c.aki}</dd>`:""}
+      ${sibs.length?`<dt>cross-sign</dt><dd>same key also certified by ${esc(sibs.map(s=>s.issuer.str).join(" · "))}</dd>`:""}
       <dt>source</dt><dd>${(c.sourceNames||[c.sourceName]).map(n=>`<span class="badge b-ok">${esc(n)}</span>`).join(" ")}</dd>
     </dl>
     ${fullDetailsHTML(c)}

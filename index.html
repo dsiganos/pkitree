@@ -468,8 +468,7 @@ async function render(){
   if(orphans.length){
     html+=`<div class="grouphead">Incomplete chains — issuer not loaded (${orphans.length})</div>`;
     html+=orphans.map(o=>{
-      const want=o.issuer.map.CN||o.issuer.str;
-      return `<div class="link-note">missing issuer: <b>${esc(want)}</b>${o.aki?` (AKI ${o.aki.slice(0,16)}…)`:""}</div>`
+      return `<div class="link-note">missing issuer: <b>${esc(o.issuer.str)}</b>${o.aki?` (AKI ${o.aki.slice(0,16)}…)`:""}</div>`
         + renderNode(o,forest,links);
     }).join("");
   }
@@ -683,7 +682,7 @@ async function matchPublicCAs(){
       if((c.selfIssued && (!c.aki || c.aki===c.ski)) || findIssuer(c)) continue;
       const m=pool.find(p=>(c.aki ? p.cert.ski===c.aki : p.cert.subject.str===c.issuer.str));
       if(m && addCertBytes(m.bytes,m.src)>0){
-        added.push(m.cert.subject.map.CN||m.cert.subject.str); progress=true;
+        added.push(m.cert.subject.str); progress=true;
       }
     }
   }

@@ -84,6 +84,9 @@ function toPem(der) {
 
 const nameOf = (dn) => dn?.CN || dn?.O || "(unknown)";                    // tls peer cert DN object
 const cnOf = (s) => s.match(/^CN=(.*)$/m)?.[1] ?? s.match(/^O=(.*)$/m)?.[1] ?? "(unknown)"; // X509Certificate DN string
+const dnStr = (dn) => Object.entries(dn ?? {})                            // full DN, tls object form
+  .map(([k, v]) => `${k}=${Array.isArray(v) ? v.join("+") : v}`).join(", ") || "(unknown)";
+const dnFlat = (s) => s.split("\n").join(", ");                           // full DN, X509Certificate form
 
 // Walk the issuerCertificate linked list; a self-signed root points at itself.
 function presentedChain(peerCert) {
@@ -92,8 +95,9 @@ function presentedChain(peerCert) {
   for (let c = peerCert; c && !seen.has(c.fingerprint256); c = c.issuerCertificate) {
     seen.add(c.fingerprint256);
     records.push({
-      cn: nameOf(c.subject), issuerCn: nameOf(c.issuer), validTo: c.valid_to,
-      raw: c.raw, selfSigned: JSON.stringify(c.subject) === JSON.stringify(c.issuer),
+      cn: nameOf(c.subject), subject: dnStr(c.subject), issuer: dnStr(c.issuer),
+      validTo: c.valid_to, raw: c.raw,
+      selfSigned: JSON.stringify(c.subject) === JSON.stringify(c.issuer),
       fromStore: false,
     });
   }
@@ -138,8 +142,9 @@ function completeChain(records, storeFiles) {
     if (!issuer || seen.has(issuer.fingerprint256)) break;
     seen.add(issuer.fingerprint256);
     records.push({
-      cn: cnOf(issuer.subject), issuerCn: cnOf(issuer.issuer), validTo: issuer.validTo,
-      raw: issuer.raw, selfSigned: issuer.checkIssued(issuer), fromStore: true,
+      cn: cnOf(issuer.subject), subject: dnFlat(issuer.subject), issuer: dnFlat(issuer.issuer),
+      validTo: issuer.validTo, raw: issuer.raw,
+      selfSigned: issuer.checkIssued(issuer), fromStore: true,
     });
     top = issuer;
   }
@@ -155,7 +160,7 @@ const sanitize = (s) => s.replace(/[^A-Za-z0-9._-]+/g, "_");
 
 function printChain(records) {
   const rows = records.map((r, i) => [
-    String(i), roleOf(r, i), r.cn, r.issuerCn, r.validTo, r.fromStore ? "CA store" : "server",
+    String(i), roleOf(r, i), r.subject, r.issuer, r.validTo, r.fromStore ? "CA store" : "server",
   ]);
   const head = ["#", "role", "subject", "issuer", "not after", "source"];
   const w = head.map((h, col) => Math.max(h.length, ...rows.map(r => r[col].length)));

@@ -1,0 +1,47 @@
+REPO := dsiganos/pkitree
+
+.PHONY: help pages-status pages-url open lint commit deploy
+
+help:
+	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
+
+pages-status: ## Show GitHub Pages deployment status
+	gh api repos/$(REPO)/pages --jq '.html_url, .status'
+
+pages-url: ## Print the GitHub Pages URL
+	@gh api repos/$(REPO)/pages --jq '.html_url'
+
+open: ## Open the live GitHub Pages site in a browser
+	xdg-open $$(gh api repos/$(REPO)/pages --jq '.html_url')
+
+lint: ## Validate HTML with vnu (requires vnu-jar or npx vnu)
+	@if command -v vnu >/dev/null 2>&1; then \
+		vnu index.html; \
+	elif command -v npx >/dev/null 2>&1; then \
+		npx --yes vnu index.html; \
+	else \
+		echo "vnu not found — install with: npm install -g vnu-jar"; exit 1; \
+	fi
+
+serve: ## Serve locally on http://localhost:8080
+	@python3 -m http.server 8080 --directory .
+
+commit: ## Stage index.html, get AI commit message, edit, then commit
+	@if [ -z "$$(git status --porcelain index.html)" ]; then \
+		echo "Nothing to commit."; \
+	else \
+		TMPFILE=$$(mktemp); \
+		git diff index.html | claude -p "Write a concise git commit message for this diff. Reply with only the message, no explanation or markdown." > $$TMPFILE; \
+		git add index.html && git commit -t $$TMPFILE; \
+		rm -f $$TMPFILE; \
+	fi
+
+deploy: ## Push and wait for GitHub Pages to rebuild
+	git push
+	@echo "Waiting for Pages to rebuild..."
+	@for i in $$(seq 1 12); do \
+		status=$$(gh api repos/$(REPO)/pages --jq '.status' 2>/dev/null); \
+		echo "  status: $$status"; \
+		[ "$$status" = "built" ] && break; \
+		sleep 5; \
+	done

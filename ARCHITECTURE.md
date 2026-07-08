@@ -81,7 +81,8 @@ a chain are added; the pool itself is never displayed.
 A minimal DER *writer* (TLV, OID, Name, UTCTime) plus WebCrypto keygen
 and signing builds two 3-tier hierarchies in-browser: Alpha Corp
 (P-256/SHA-256) and Beta Corp (P-384/SHA-384), with correct SKI/AKI
-linkage so verification genuinely passes.
+linkage so verification genuinely passes. Each leaf's private key is
+exported as PKCS#8 and fed through the normal key-matching path.
 
 ## Security / privacy model
 

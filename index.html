@@ -343,7 +343,7 @@ function cardHTML(c, childrenCount){
   if(c.sigAlg.hash==="SHA-1") badges.push(`<span class="badge b-warn">SHA-1 signature</span>`);
   if(c.keyKind==="RSA" && /RSA (512|768|1024)-/.test(c.keyInfo)) badges.push(`<span class="badge b-warn">weak key</span>`);
   const km=c.pubId && keys.find(k=>k.pubId===c.pubId);
-  if(km) badges.push(`<span class="badge b-ok">private key: ${esc(km.name)}</span>`);
+  if(km) badges.push(`<span class="badge b-ok">private key: ${esc(km.names.join(", "))}</span>`);
   const cn=c.subject.map.CN||c.subject.map.O||c.subject.str||"(no subject)";
   return `<div class="card">
     <div class="cn">${esc(cn)}</div>
@@ -356,7 +356,7 @@ function cardHTML(c, childrenCount){
       <dt>serial</dt><dd>${esc(c.serial)}</dd>
       ${c.ski?`<dt>SKI</dt><dd>${c.ski}</dd>`:""}
       ${c.aki?`<dt>AKI</dt><dd>${c.aki}</dd>`:""}
-      <dt>source</dt><dd>${esc(c.sourceName)}</dd>
+      <dt>source</dt><dd>${esc((c.sourceNames||[c.sourceName]).join(", "))}</dd>
     </dl>
   </div>`;
 }
@@ -401,7 +401,7 @@ async function render(){
   const unmatchedKeys=keys.filter(k=>!certs.some(c=>c.pubId===k.pubId));
   if(unmatchedKeys.length){
     html+=`<div class="grouphead">Private keys — no matching certificate (${unmatchedKeys.length})</div>`;
-    html+=unmatchedKeys.map(k=>`<div class="link-note">${esc(k.name)} · ${esc(k.info)}</div>`).join("");
+    html+=unmatchedKeys.map(k=>`<div class="link-note">${esc(k.names.join(", "))} · ${esc(k.info)}</div>`).join("");
   }
   el.innerHTML=html;
 
@@ -424,7 +424,12 @@ function toast(msg, cls){ const t=$("toast"); t.textContent=msg; t.className="to
 function addCertBytes(bytes, name){
   try{
     const c=parseCert(bytes, name);
-    if(seen.has(c.id)) return 0;
+    if(seen.has(c.id)){ // duplicate — remember the extra filename
+      const e=certs.find(x=>x.id===c.id);
+      if(e && !e.sourceNames.includes(name)) e.sourceNames.push(name);
+      return 0;
+    }
+    c.sourceNames=[name];
     seen.add(c.id); certs.push(c); return 1;
   }catch(e){ return -1; }
 }
@@ -496,8 +501,9 @@ async function parsePrivateKeyBytes(bytes){
 }
 async function addKey(bytes,name){
   const k=await parsePrivateKeyBytes(bytes);
-  if(keys.some(x=>x.pubId===k.pubId)) return 0;
-  keys.push({...k, name}); return 1;
+  const e=keys.find(x=>x.pubId===k.pubId);
+  if(e){ if(!e.names.includes(name)) e.names.push(name); return 0; } // same key, extra filename
+  keys.push({...k, names:[name]}); return 1;
 }
 function keyPemBlocks(text){
   const out=[];
@@ -623,10 +629,11 @@ $("pubcabtn").addEventListener("click", async ()=>{
 $("demobtn").addEventListener("click", async ()=>{
   toast("Generating two demo PKI hierarchies with WebCrypto…","info");
   try{
-    const chain=await makeDemoChains();
-    for(const [bytes,name] of chain) addCertBytes(bytes,name);
+    const demo=await makeDemoChains();
+    for(const [bytes,name] of demo.certs) addCertBytes(bytes,name);
+    for(const [bytes,name] of demo.keys) await addKey(bytes,name);
     await render();
-    toast("Demo chains loaded — Alpha Corp (P-256) and Beta Corp (P-384), verified locally.","info");
+    toast("Demo chains loaded — Alpha Corp (P-256) and Beta Corp (P-384) with leaf private keys, verified locally.","info");
   }catch(e){ toast("Demo generation failed: "+e.message,"err"); }
 });
 
@@ -677,12 +684,14 @@ async function makeDemoChains(){
     const root =await issue(`${org} Root CA`,     org, rootK, `${org} Root CA`,     org, rootK, true,  s1, null);
     const inter =await issue(`${org} Issuing CA`,  org, intK,  `${org} Root CA`,     org, rootK, true,  s2, s1);
     const leaf  =await issue(`device-001.demo`,    org, leafK, `${org} Issuing CA`,  org, intK,  false, s3, s2);
-    return [[root,org],[inter,org],[leaf,org]];
+    const leafKey=new Uint8Array(await crypto.subtle.exportKey("pkcs8",leafK.privateKey));
+    return {certs:[[root,org],[inter,org],[leaf,org]],
+            key:[leafKey, org.toLowerCase().replace(/ /g,"-")+"-device.key"]};
   }
 
   const c1=await buildChain("P-256","SHA-256","1.2.840.10045.4.3.2","Alpha Corp",[0xAA,0xBB,0xCC]);
   const c2=await buildChain("P-384","SHA-384","1.2.840.10045.4.3.3","Beta Corp", [0xDD,0xEE,0xFF]);
-  return [...c1,...c2];
+  return {certs:[...c1.certs,...c2.certs], keys:[c1.key,c2.key]};
 }
 </script>
 </body>

@@ -45,12 +45,17 @@ refresh-cas: ## Refresh roots.pem + intermediates.pem from Mozilla data
 	open('intermediates.pem','w').write('\n'.join(pems)+'\n'); print('intermediates:',len(pems))"
 	@grep -c "BEGIN CERTIFICATE" roots.pem intermediates.pem
 
-deploy: ## Push and wait for GitHub Pages to rebuild
+deploy: ## Push and wait for GitHub Pages to build this exact commit
 	git push
-	@echo "Waiting for Pages to rebuild..."
-	@for i in $$(seq 1 12); do \
-		status=$$(gh api repos/$(REPO)/pages --jq '.status' 2>/dev/null); \
-		echo "  status: $$status"; \
-		[ "$$status" = "built" ] && break; \
+	@sha=$$(git rev-parse HEAD); \
+	echo "Waiting for Pages to build $$sha..."; \
+	for i in $$(seq 1 24); do \
+		out=$$(gh api repos/$(REPO)/pages/builds/latest --jq '.commit + " " + .status' 2>/dev/null); \
+		echo "  $$out"; \
+		case "$$out" in \
+			"$$sha built")   echo "Deployed."; exit 0;; \
+			"$$sha errored") echo "Pages build FAILED."; exit 1;; \
+		esac; \
 		sleep 5; \
-	done
+	done; \
+	echo "Timed out waiting for Pages to build $$sha"; exit 1

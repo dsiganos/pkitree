@@ -128,6 +128,9 @@ function systemPool() {
 }
 
 // Append missing issuers from the CA store; each link must verify cryptographically.
+// Handles cross-signed tops (e.g. GTS Root R1 signed by a since-removed GlobalSign
+// root): if the top's own subject+key exist self-signed in the store, that root is
+// the modern trust anchor and is appended instead.
 function completeChain(records, storeFiles) {
   if (records[records.length - 1].selfSigned) return;
   const pool = storeFiles.length ? loadStore(storeFiles) : systemPool();
@@ -135,21 +138,26 @@ function completeChain(records, storeFiles) {
     console.error("note: no CA store found — chain completion skipped");
     return;
   }
+  const spki = (c) => c.publicKey.export({ type: "spki", format: "der" });
+  const push = (c) => records.push({
+    cn: cnOf(c.subject), subject: dnFlat(c.subject), issuer: dnFlat(c.issuer),
+    validTo: c.validTo, raw: c.raw, selfSigned: c.checkIssued(c), fromStore: true,
+  });
   let top = new X509Certificate(records[records.length - 1].raw);
   const seen = new Set([top.fingerprint256]);
   while (!top.checkIssued(top)) {
-    const issuer = pool.find(p => top.checkIssued(p) && top.verify(p.publicKey));
-    if (!issuer || seen.has(issuer.fingerprint256)) break;
-    seen.add(issuer.fingerprint256);
-    records.push({
-      cn: cnOf(issuer.subject), subject: dnFlat(issuer.subject), issuer: dnFlat(issuer.issuer),
-      validTo: issuer.validTo, raw: issuer.raw,
-      selfSigned: issuer.checkIssued(issuer), fromStore: true,
-    });
-    top = issuer;
+    const next =
+      pool.find(p => top.checkIssued(p) && top.verify(p.publicKey))          // real issuer
+      ?? pool.find(p => p.subject === top.subject && p.checkIssued(p)        // self-signed
+                     && spki(p).equals(spki(top)));                          //   sibling of a
+    if (!next || seen.has(next.fingerprint256)) break;                       //   cross-signed top
+    seen.add(next.fingerprint256);
+    push(next);
+    top = next;
   }
   if (!records[records.length - 1].selfSigned)
-    console.error("note: root not found — server chain incomplete and no CA store match");
+    console.error("note: root not found — server chain incomplete and no CA store match "
+      + "(try --castore with the PKI's CA bundle)");
 }
 
 /* ---------- output ---------- */

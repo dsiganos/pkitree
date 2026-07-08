@@ -342,7 +342,8 @@ function cardHTML(c, childrenCount){
   else if(c.notAfter<soon) badges.push(`<span class="badge b-warn">expires ${fmtDate(c.notAfter)}</span>`);
   if(c.sigAlg.hash==="SHA-1") badges.push(`<span class="badge b-warn">SHA-1 signature</span>`);
   if(c.keyKind==="RSA" && /RSA (512|768|1024)-/.test(c.keyInfo)) badges.push(`<span class="badge b-warn">weak key</span>`);
-  if(c.pubId && keys.some(k=>k.pubId===c.pubId)) badges.push(`<span class="badge b-ok">private key loaded</span>`);
+  const km=c.pubId && keys.find(k=>k.pubId===c.pubId);
+  if(km) badges.push(`<span class="badge b-ok">private key: ${esc(km.name)}</span>`);
   const cn=c.subject.map.CN||c.subject.map.O||c.subject.str||"(no subject)";
   return `<div class="card">
     <div class="cn">${esc(cn)}</div>

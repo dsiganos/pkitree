@@ -1,6 +1,6 @@
 REPO := dsiganos/pkitree
 
-.PHONY: help pages-status pages-url open lint commit deploy
+.PHONY: help pages-status pages-url open lint commit deploy refresh-cas
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'
@@ -35,6 +35,15 @@ commit: ## Stage index.html, get AI commit message, edit, then commit
 		git add index.html && git commit -t $$TMPFILE; \
 		rm -f $$TMPFILE; \
 	fi
+
+refresh-cas: ## Refresh roots.pem + intermediates.pem from Mozilla data
+	curl -sf https://curl.se/ca/cacert.pem -o roots.pem
+	curl -sf https://firefox-settings-attachments.cdn.mozilla.net/bundles/security-state--intermediates.zip -o /tmp/rs-intermediates.zip
+	python3 -c "import zipfile; z=zipfile.ZipFile('/tmp/rs-intermediates.zip'); \
+	pems=[z.read(n).decode('utf-8','replace').strip() for n in z.namelist() if not n.endswith('.meta.json')]; \
+	pems=[p for p in pems if 'BEGIN CERTIFICATE' in p]; \
+	open('intermediates.pem','w').write('\n'.join(pems)+'\n'); print('intermediates:',len(pems))"
+	@grep -c "BEGIN CERTIFICATE" roots.pem intermediates.pem
 
 deploy: ## Push and wait for GitHub Pages to rebuild
 	git push

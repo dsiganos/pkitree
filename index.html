@@ -98,7 +98,7 @@
     <div class="rowbtns" style="justify-content:center">
       <button class="primary" id="browse">Choose files</button>
       <button id="pastebtn">Paste PEM</button>
-      <button id="demobtn">Load demo chain</button>
+      <button id="demobtn">Load demo chains</button>
       <button id="clearbtn">Clear all</button>
     </div>
   </div>
@@ -470,14 +470,14 @@ $("parsepaste").addEventListener("click",async()=>{
 });
 $("clearbtn").addEventListener("click",async()=>{ certs.length=0; seen.clear(); await render(); toast("Cleared.","info"); });
 
-/* ---------------- demo chain: generate a 3-tier PKI in-browser ---------------- */
+/* ---------------- demo chains: generate two 3-tier PKIs in-browser ---------------- */
 $("demobtn").addEventListener("click", async ()=>{
-  toast("Generating demo Root → Intermediate → Leaf chain with WebCrypto…","info");
+  toast("Generating two demo PKI hierarchies with WebCrypto…","info");
   try{
-    const chain=await makeDemoChain();
+    const chain=await makeDemoChains();
     for(const [bytes,name] of chain) addCertBytes(bytes,name);
     await render();
-    toast("Demo chain loaded — signatures generated and verified locally.","info");
+    toast("Demo chains loaded — Alpha Corp (P-256) and Beta Corp (P-384), verified locally.","info");
   }catch(e){ toast("Demo generation failed: "+e.message,"err"); }
 });
 
@@ -494,37 +494,46 @@ function derUTF8(s){ return tlv(0x0c,[...new TextEncoder().encode(s)]); }
 function derName(cn,o){ return tlv(0x30,[...tlv(0x31,[...tlv(0x30,[...derOID("2.5.4.10"),...derUTF8(o)])]),
   ...tlv(0x31,[...tlv(0x30,[...derOID("2.5.4.3"),...derUTF8(cn)])])]); }
 function derTimeEnc(d){ const s=d.toISOString().replace(/[-:T]/g,"").slice(2,14)+"Z"; return tlv(0x17,[...new TextEncoder().encode(s)]); }
-async function makeDemoChain(){
-  const mk=()=>crypto.subtle.generateKey({name:"ECDSA",namedCurve:"P-256"},true,["sign","verify"]);
-  const rootK=await mk(), intK=await mk(), leafK=await mk();
+async function makeDemoChains(){
   const spki=async k=>new Uint8Array(await crypto.subtle.exportKey("spki",k.publicKey));
-  const sigAlg=tlv(0x30,[...derOID("1.2.840.10045.4.3.2")]);
-  const rawToDer=(raw)=>{ const enc=(b)=>{ let x=b; while(x.length>1&&x[0]===0)x=x.slice(1);
+  /* rawToDer: split at midpoint so it works for both P-256 (64 B) and P-384 (96 B) */
+  const rawToDer=(raw)=>{ const h=raw.length>>1;
+    const enc=(b)=>{ let x=b; while(x.length>1&&x[0]===0)x=x.slice(1);
       if(x[0]&0x80) x=new Uint8Array([0,...x]); return tlv(2,[...x]); };
-    return tlv(0x30,[...enc(raw.slice(0,32)),...enc(raw.slice(32))]); };
+    return tlv(0x30,[...enc(raw.slice(0,h)),...enc(raw.slice(h))]); };
   let serial=1;
-  async function issue(subjCN,subjO,subjKey,issuerCN,issuerO,issuerKey,isCA,skiByte,akiByte){
-    const exts=[];
-    exts.push(tlv(0x30,[...derOID("2.5.29.19"),...tlv(4,[...tlv(0x30,isCA?[...tlv(1,[255])]:[])])]));
-    exts.push(tlv(0x30,[...derOID("2.5.29.14"),...tlv(4,[...tlv(4,new Array(20).fill(skiByte))])]));
-    if(akiByte!==null) exts.push(tlv(0x30,[...derOID("2.5.29.35"),
-      ...tlv(4,[...tlv(0x30,[...tlv(0x80,new Array(20).fill(akiByte))])])]));
-    const now=new Date(), later=new Date(Date.now()+365*864e5);
-    const tbs=tlv(0x30,[
-      ...tlv(0xa0,[...tlv(2,[2])]), ...tlv(2,[serial++]), ...sigAlg,
-      ...derName(issuerCN,issuerO),
-      ...tlv(0x30,[...derTimeEnc(now),...derTimeEnc(later)]),
-      ...derName(subjCN,subjO), ...(await spki(subjKey)),
-      ...tlv(0xa3,[...tlv(0x30,exts.reduce((a,e)=>[...a,...e],[]))])
-    ]);
-    const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash:"SHA-256"},issuerKey.privateKey,tbs));
-    const sig=rawToDer(raw);
-    return tlv(0x30,[...tbs,...sigAlg,...tlv(3,[0,...sig])]);
+
+  async function buildChain(curve, hash, sigOID, org, skiBytes){
+    const mk=()=>crypto.subtle.generateKey({name:"ECDSA",namedCurve:curve},true,["sign","verify"]);
+    const rootK=await mk(), intK=await mk(), leafK=await mk();
+    const sigAlg=tlv(0x30,[...derOID(sigOID)]);
+    async function issue(subjCN,subjO,subjKey,issuerCN,issuerO,issuerKey,isCA,skiByte,akiByte){
+      const exts=[];
+      exts.push(tlv(0x30,[...derOID("2.5.29.19"),...tlv(4,[...tlv(0x30,isCA?[...tlv(1,[255])]:[])])]));
+      exts.push(tlv(0x30,[...derOID("2.5.29.14"),...tlv(4,[...tlv(4,new Array(20).fill(skiByte))])]));
+      if(akiByte!==null) exts.push(tlv(0x30,[...derOID("2.5.29.35"),
+        ...tlv(4,[...tlv(0x30,[...tlv(0x80,new Array(20).fill(akiByte))])])]));
+      const now=new Date(), later=new Date(Date.now()+365*864e5);
+      const tbs=tlv(0x30,[
+        ...tlv(0xa0,[...tlv(2,[2])]), ...tlv(2,[serial++]), ...sigAlg,
+        ...derName(issuerCN,issuerO),
+        ...tlv(0x30,[...derTimeEnc(now),...derTimeEnc(later)]),
+        ...derName(subjCN,subjO), ...(await spki(subjKey)),
+        ...tlv(0xa3,[...tlv(0x30,exts.reduce((a,e)=>[...a,...e],[]))])
+      ]);
+      const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash},issuerKey.privateKey,tbs));
+      return tlv(0x30,[...tbs,...sigAlg,...tlv(3,[0,...rawToDer(raw)])]);
+    }
+    const [s1,s2,s3]=skiBytes;
+    const root =await issue(`${org} Root CA`,     org, rootK, `${org} Root CA`,     org, rootK, true,  s1, null);
+    const inter =await issue(`${org} Issuing CA`,  org, intK,  `${org} Root CA`,     org, rootK, true,  s2, s1);
+    const leaf  =await issue(`device-001.demo`,    org, leafK, `${org} Issuing CA`,  org, intK,  false, s3, s2);
+    return [[root,org],[inter,org],[leaf,org]];
   }
-  const root=await issue("Demo Root CA","pkitree demo",rootK,"Demo Root CA","pkitree demo",rootK,true,0xAA,null);
-  const inter=await issue("Demo Issuing CA","pkitree demo",intK,"Demo Root CA","pkitree demo",rootK,true,0xBB,0xAA);
-  const leaf=await issue("device-0042.demo.local","pkitree demo",leafK,"Demo Issuing CA","pkitree demo",intK,false,0xCC,0xBB);
-  return [[root,"demo"],[inter,"demo"],[leaf,"demo"]];
+
+  const c1=await buildChain("P-256","SHA-256","1.2.840.10045.4.3.2","Alpha Corp",[0xAA,0xBB,0xCC]);
+  const c2=await buildChain("P-384","SHA-384","1.2.840.10045.4.3.3","Beta Corp", [0xDD,0xEE,0xFF]);
+  return [...c1,...c2];
 }
 </script>
 </body>

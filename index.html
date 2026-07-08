@@ -422,7 +422,7 @@ function cardHTML(c, childrenCount){
     <div class="dn">${esc(c.subject.str)}</div>
     <div class="badges">${badges.join("")}</div>
     <dl class="meta">
-      <dt>issuer</dt><dd>${esc(c.issuer.map.CN||c.issuer.str)}</dd>
+      <dt>issuer</dt><dd>${esc(c.issuer.str)}</dd>
       <dt>validity</dt><dd>${fmtDate(c.notBefore)} → ${fmtDate(c.notAfter)}</dd>
       <dt>key</dt><dd>${esc(c.keyInfo)} · ${esc(c.sigAlg.label)}</dd>
       <dt>serial</dt><dd>${esc(c.serial)}</dd>

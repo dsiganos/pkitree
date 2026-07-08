@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 // fetch-chain — connect to a TLS/mTLS server, print its certificate chain,
 // and save the CA and intermediate certificates as PEM files.
+// If the server omits the root (they usually do), the chain is completed
+// from the system CA store (or --castore bundles), with actual signature
+// verification of each added link.
 //
 // Zero dependencies; Node ≥ 16.
 
@@ -8,6 +11,14 @@ import tls from "node:tls";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
+import { X509Certificate } from "node:crypto";
+
+const SYSTEM_BUNDLES = [
+  "/etc/ssl/certs/ca-certificates.crt", // Debian/Ubuntu
+  "/etc/pki/tls/certs/ca-bundle.crt",   // RHEL/Fedora
+  "/etc/ssl/ca-bundle.pem",             // openSUSE
+  "/etc/ssl/cert.pem",                  // Alpine, macOS
+];
 
 const USAGE = `usage: fetch-chain.mjs <host>[:port] [options]
 
@@ -17,12 +28,17 @@ options:
   --cert <file>     client certificate for mTLS (PEM)
   --key <file>      client private key for mTLS (PEM)
   --outdir <dir>    where to save PEM files            (default: chain/)
+  --castore <file>  PEM bundle used to complete the chain (repeatable;
+                    default: the system CA store — note that system
+                    stores hold roots only; for missing intermediates
+                    point this at pkitree's intermediates.pem)
   --include-leaf    also save the leaf certificate
   -h, --help        this text
 
-Certificate verification is disabled on purpose: the point is to
-retrieve chains from private/unknown PKIs. Do not treat a successful
-connection as trust.`;
+Certificate verification of the server is disabled on purpose: the point
+is to retrieve chains from private/unknown PKIs. Certificates added from
+the CA store, however, are only accepted if they cryptographically
+verify the chain link.`;
 
 function fail(msg) {
   console.error(`error: ${msg}`);
@@ -30,7 +46,7 @@ function fail(msg) {
 }
 
 function parseArgs(argv) {
-  const opts = { port: 443, outdir: "chain", includeLeaf: false };
+  const opts = { port: 443, outdir: "chain", castore: [], includeLeaf: false };
   const pos = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -40,6 +56,7 @@ function parseArgs(argv) {
       case "--cert":         opts.cert = argv[++i]; break;
       case "--key":          opts.key = argv[++i]; break;
       case "--outdir":       opts.outdir = argv[++i]; break;
+      case "--castore":      opts.castore.push(argv[++i]); break;
       case "--include-leaf": opts.includeLeaf = true; break;
       case "-h": case "--help": console.log(USAGE); process.exit(0);
       default:
@@ -63,50 +80,105 @@ function toPem(der) {
     + "\n-----END CERTIFICATE-----\n";
 }
 
+/* ---------- chain records: one uniform shape for server + store certs ---------- */
+
+const nameOf = (dn) => dn?.CN || dn?.O || "(unknown)";                    // tls peer cert DN object
+const cnOf = (s) => s.match(/^CN=(.*)$/m)?.[1] ?? s.match(/^O=(.*)$/m)?.[1] ?? "(unknown)"; // X509Certificate DN string
+
 // Walk the issuerCertificate linked list; a self-signed root points at itself.
-function chainOf(peerCert) {
-  const chain = [];
+function presentedChain(peerCert) {
+  const records = [];
   const seen = new Set();
   for (let c = peerCert; c && !seen.has(c.fingerprint256); c = c.issuerCertificate) {
     seen.add(c.fingerprint256);
-    chain.push(c);
+    records.push({
+      cn: nameOf(c.subject), issuerCn: nameOf(c.issuer), validTo: c.valid_to,
+      raw: c.raw, selfSigned: JSON.stringify(c.subject) === JSON.stringify(c.issuer),
+      fromStore: false,
+    });
   }
-  return chain;
+  return records;
 }
 
-function roleOf(cert, index) {
-  if (index === 0) return "leaf";
-  const selfSigned = JSON.stringify(cert.subject) === JSON.stringify(cert.issuer);
-  return selfSigned ? "root" : "intermediate";
+function loadStore(files) {
+  const pool = [];
+  const pemRe = /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g;
+  for (const f of files) {
+    if (!fs.existsSync(f)) continue;
+    for (const block of fs.readFileSync(f, "utf8").match(pemRe) ?? []) {
+      try { pool.push(new X509Certificate(block)); } catch { /* skip junk */ }
+    }
+  }
+  return pool;
 }
 
-const nameOf = (dn) => dn?.CN || dn?.O || "(unknown)";
+// System store: first OS bundle found + Node's bundled Mozilla roots
+// (tls.rootCertificates also picks up NODE_EXTRA_CA_CERTS).
+function systemPool() {
+  const bundle = SYSTEM_BUNDLES.find(f => fs.existsSync(f));
+  const pool = bundle ? loadStore([bundle]) : [];
+  for (const pem of tls.rootCertificates) {
+    try { pool.push(new X509Certificate(pem)); } catch { /* skip junk */ }
+  }
+  return pool;
+}
+
+// Append missing issuers from the CA store; each link must verify cryptographically.
+function completeChain(records, storeFiles) {
+  if (records[records.length - 1].selfSigned) return;
+  const pool = storeFiles.length ? loadStore(storeFiles) : systemPool();
+  if (!pool.length) {
+    console.error("note: no CA store found — chain completion skipped");
+    return;
+  }
+  let top = new X509Certificate(records[records.length - 1].raw);
+  const seen = new Set([top.fingerprint256]);
+  while (!top.checkIssued(top)) {
+    const issuer = pool.find(p => top.checkIssued(p) && top.verify(p.publicKey));
+    if (!issuer || seen.has(issuer.fingerprint256)) break;
+    seen.add(issuer.fingerprint256);
+    records.push({
+      cn: cnOf(issuer.subject), issuerCn: cnOf(issuer.issuer), validTo: issuer.validTo,
+      raw: issuer.raw, selfSigned: issuer.checkIssued(issuer), fromStore: true,
+    });
+    top = issuer;
+  }
+  if (!records[records.length - 1].selfSigned)
+    console.error("note: root not found — server chain incomplete and no CA store match");
+}
+
+/* ---------- output ---------- */
+
+const roleOf = (r, index) =>
+  index === 0 ? "leaf" : r.selfSigned ? "root" : "intermediate";
 const sanitize = (s) => s.replace(/[^A-Za-z0-9._-]+/g, "_");
 
-function printChain(chain) {
-  const rows = chain.map((c, i) => [
-    String(i), roleOf(c, i), nameOf(c.subject), nameOf(c.issuer), c.valid_to,
+function printChain(records) {
+  const rows = records.map((r, i) => [
+    String(i), roleOf(r, i), r.cn, r.issuerCn, r.validTo, r.fromStore ? "CA store" : "server",
   ]);
-  const head = ["#", "role", "subject", "issuer", "not after"];
+  const head = ["#", "role", "subject", "issuer", "not after", "source"];
   const w = head.map((h, col) => Math.max(h.length, ...rows.map(r => r[col].length)));
   const line = (r) => r.map((cell, col) => cell.padEnd(w[col])).join("  ");
   console.log(line(head));
   for (const r of rows) console.log(line(r));
 }
 
-function saveChain(chain, opts) {
+function saveChain(records, opts) {
   fs.mkdirSync(opts.outdir, { recursive: true });
   const saved = [];
-  chain.forEach((c, i) => {
-    const role = roleOf(c, i);
+  records.forEach((r, i) => {
+    const role = roleOf(r, i);
     if (role === "leaf" && !opts.includeLeaf) return;
     const file = path.join(opts.outdir,
-      `${String(i).padStart(2, "0")}-${role}-${sanitize(nameOf(c.subject))}.pem`);
-    fs.writeFileSync(file, toPem(c.raw));
+      `${String(i).padStart(2, "0")}-${role}-${sanitize(r.cn)}.pem`);
+    fs.writeFileSync(file, toPem(r.raw));
     saved.push(file);
   });
   return saved;
 }
+
+/* ---------- main ---------- */
 
 function readFileOr(file, what) {
   try { return fs.readFileSync(file); }
@@ -127,11 +199,12 @@ function main() {
     console.log(`connected: ${opts.host}:${opts.port} `
       + `(${socket.getProtocol()}, ${socket.getCipher().name})`
       + `${opts.cert ? ", client certificate presented" : ""}\n`);
-    const chain = chainOf(socket.getPeerCertificate(true));
+    const records = presentedChain(socket.getPeerCertificate(true));
     socket.end();
-    if (!chain.length) fail("server presented no certificate");
-    printChain(chain);
-    const saved = saveChain(chain, opts);
+    if (!records.length) fail("server presented no certificate");
+    completeChain(records, opts.castore);
+    printChain(records);
+    const saved = saveChain(records, opts);
     console.log(saved.length
       ? `\nsaved:\n${saved.map(f => "  " + f).join("\n")}`
       : "\nnothing saved (only a leaf was presented; use --include-leaf to save it)");

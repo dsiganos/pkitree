@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Chainsight — X.509 hierarchy analyzer</title>
+<title>pkitree — X.509 hierarchy analyzer</title>
 <style>
   :root{
     --bg:#F5F7FA; --panel:#FFFFFF; --ink:#1B2430; --muted:#69748A;
@@ -74,14 +74,21 @@
   .meta dd{word-break:break-all;}
   details.raw{margin-top:8px;}
   details.raw summary{font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;}
-  .privacy{margin-top:34px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;}
+  .privacy{margin-top:14px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);padding-top:12px;}
+  .legend{margin-top:34px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;font-size:13px;}
+  .legend h2{font-family:var(--mono);font-size:12.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent);margin-bottom:10px;}
+  .gloss{display:grid;grid-template-columns:96px 1fr;gap:8px 12px;}
+  .gloss dt{font-family:var(--mono);font-size:12px;color:var(--accent);white-space:nowrap;}
+  .gloss dd{color:var(--ink);max-width:75ch;}
+  .legend .mono{font-family:var(--mono);background:var(--accent-soft);padding:1px 5px;border-radius:4px;font-size:12px;}
+  @media (max-width:520px){ .gloss{grid-template-columns:1fr;gap:2px;} .gloss dd{margin-bottom:8px;color:var(--muted);} }
   @media (prefers-reduced-motion: reduce){ *{transition:none !important} }
 </style>
 </head>
 <body>
 <div class="wrap">
   <header>
-    <h1>chainsight<span class="dim">://</span>x509</h1>
+    <h1>pkitree<span class="dim">://</span>x509</h1>
     <p>Drop certificates and see how they connect. Chains are rebuilt from <b>AKI → SKI</b> key identifiers, issuer/subject names, and — where the browser supports the algorithm — <b>actual signature verification</b>. Everything runs locally; nothing is uploaded.</p>
   </header>
 
@@ -108,6 +115,17 @@
   </div>
 
   <div class="forest" id="forest"></div>
+
+  <section class="legend">
+    <h2>How chains are connected</h2>
+    <dl class="gloss">
+      <dt>SKI</dt><dd><b>Subject Key Identifier</b> — a hash of the certificate's <em>own</em> public key. Its ID badge.</dd>
+      <dt>AKI</dt><dd><b>Authority Key Identifier</b> — the fingerprint of the key that <em>signed</em> this certificate. A pointer at its parent.</dd>
+      <dt>AKI ⇒ SKI</dt><dd>A link made because <span class="mono">child.AKI = parent.SKI</span>. The most reliable match — immune to name collisions and CA key rollover, where a renewed CA keeps the same name but a new key.</dd>
+      <dt>DN match</dt><dd>Fallback when key identifiers are missing: the child's issuer name equals the parent's subject name. Weaker, since names can repeat.</dd>
+      <dt>✓ / ✗</dt><dd>The label says <em>who</em> the parent is claimed to be; the tick means the signature was actually verified against the parent's public key. A self-signed root has no AKI, or an AKI equal to its own SKI.</dd>
+    </dl>
+  </section>
 
   <p class="privacy">Client-side only: parsing and verification happen in this page via WebCrypto. Signature checks cover RSA (SHA-256/384/512) and ECDSA (P-256/P-384); other algorithms fall back to key-identifier / name matching, marked accordingly.</p>
 </div>
@@ -503,9 +521,9 @@ async function makeDemoChain(){
     const sig=rawToDer(raw);
     return tlv(0x30,[...tbs,...sigAlg,...tlv(3,[0,...sig])]);
   }
-  const root=await issue("Demo Root CA","Chainsight Demo",rootK,"Demo Root CA","Chainsight Demo",rootK,true,0xAA,null);
-  const inter=await issue("Demo Issuing CA","Chainsight Demo",intK,"Demo Root CA","Chainsight Demo",rootK,true,0xBB,0xAA);
-  const leaf=await issue("device-0042.demo.local","Chainsight Demo",leafK,"Demo Issuing CA","Chainsight Demo",intK,false,0xCC,0xBB);
+  const root=await issue("Demo Root CA","pkitree demo",rootK,"Demo Root CA","pkitree demo",rootK,true,0xAA,null);
+  const inter=await issue("Demo Issuing CA","pkitree demo",intK,"Demo Root CA","pkitree demo",rootK,true,0xBB,0xAA);
+  const leaf=await issue("device-0042.demo.local","pkitree demo",leafK,"Demo Issuing CA","pkitree demo",intK,false,0xCC,0xBB);
   return [[root,"demo"],[inter,"demo"],[leaf,"demo"]];
 }
 </script>

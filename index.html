@@ -356,7 +356,7 @@ function cardHTML(c, childrenCount){
       <dt>serial</dt><dd>${esc(c.serial)}</dd>
       ${c.ski?`<dt>SKI</dt><dd>${c.ski}</dd>`:""}
       ${c.aki?`<dt>AKI</dt><dd>${c.aki}</dd>`:""}
-      <dt>source</dt><dd>${esc((c.sourceNames||[c.sourceName]).join(", "))}</dd>
+      <dt>source</dt><dd>${(c.sourceNames||[c.sourceName]).map(n=>`<span class="badge b-ok">${esc(n)}</span>`).join(" ")}</dd>
     </dl>
   </div>`;
 }

@@ -72,6 +72,18 @@
     font-size:12px;font-family:var(--mono);}
   .meta dt{color:var(--muted);}
   .meta dd{word-break:break-all;}
+  /* compact mode: one-line cards, relationships up front; click a card to focus it */
+  .compact .card{display:flex;align-items:center;flex-wrap:wrap;gap:4px 10px;
+    padding:7px 12px;margin:4px 0 10px;cursor:pointer;}
+  .compact .card .dn,.compact .card .meta,.compact .card details.raw{display:none;}
+  .compact .card .cn{font-size:13px;}
+  .compact .badges{margin-top:0;}
+  .compact .link-note .linktext{display:none;}
+  .compact .card.focus{display:block;}
+  .compact .card.focus .dn{display:block;}
+  .compact .card.focus .meta{display:grid;}
+  .compact .card.focus details.raw{display:block;}
+
   details.raw{margin-top:8px;}
   details.raw summary{font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;}
   details.raw summary:hover{color:var(--accent);}
@@ -104,6 +116,7 @@
       <button id="pastebtn">Paste PEM</button>
       <button id="demobtn">Load demo chains</button>
       <button id="pubcabtn">Match public CAs</button>
+      <button id="compactbtn">Compact view</button>
       <button id="clearbtn">Clear all</button>
     </div>
   </div>
@@ -441,11 +454,11 @@ function cardHTML(c, childrenCount){
 }
 function linkNoteHTML(link){
   if(!link) return "";
-  let v;
-  if(link.verify==="ok") v=`<span class="v-ok">✓ signature verified</span>`;
-  else if(link.verify==="fail") v=`<span class="v-dn" style="color:var(--bad)">✗ SIGNATURE INVALID</span>`;
-  else v=`<span class="v-dn">matched by name only (alg not verifiable in browser)</span>`;
-  return `<div class="link-note">${esc(link.how)} · ${v}</div>`;
+  let tick, text;
+  if(link.verify==="ok"){ tick=`<span class="v-ok">✓</span>`; text=`<span class="v-ok">signature verified</span>`; }
+  else if(link.verify==="fail"){ tick=`<span class="v-dn" style="color:var(--bad)">✗</span>`; text=`<span class="v-dn" style="color:var(--bad)">SIGNATURE INVALID</span>`; }
+  else { tick=`<span class="v-dn">•</span>`; text=`<span class="v-dn">matched by name only (alg not verifiable in browser)</span>`; }
+  return `<div class="link-note">${tick}<span class="linktext">${esc(link.how)} · ${text}</span></div>`;
 }
 function renderNode(c, forest, links){
   const kids=forest.childrenOf(c);
@@ -661,6 +674,16 @@ $("parsepaste").addEventListener("click",async()=>{
   $("pastearea").value=""; await render();
 });
 $("clearbtn").addEventListener("click",async()=>{ certs.length=0; seen.clear(); keys.length=0; await render(); toast("Cleared.","info"); });
+$("compactbtn").addEventListener("click",()=>{
+  const on=$("forest").classList.toggle("compact");
+  $("compactbtn").textContent=on?"Full view":"Compact view";
+});
+$("forest").addEventListener("click",e=>{
+  if(!$("forest").classList.contains("compact")) return;
+  if(e.target.closest("details.raw")) return; // let the full-details expander work inside a focused card
+  const card=e.target.closest(".card");
+  if(card) card.classList.toggle("focus");
+});
 
 /* ---------------- public CA matching (Mozilla roots + CCADB intermediates) ----------------
    roots.pem / intermediates.pem are same-origin data files refreshed by `make refresh-cas`;

@@ -10,6 +10,7 @@
     --line:#D9DFE8; --accent:#3B5BDB; --accent-soft:#EDF1FE;
     --ok:#2B8A3E; --ok-soft:#E6F4EA; --warn:#B95C00; --warn-soft:#FFF1E0;
     --bad:#C92A2A; --bad-soft:#FDECEC; --rail:#B9C3D4;
+    --xsign:#7048B6; --xsign-soft:#F2ECFB;
     --mono:"SF Mono","Cascadia Code","JetBrains Mono",Menlo,Consolas,monospace;
     --sans:"Segoe UI",system-ui,-apple-system,sans-serif;
   }
@@ -49,8 +50,8 @@
   .forest{margin-top:14px;}
   .tree + .tree{border-top:1px solid var(--line);margin-top:22px;padding-top:16px;}
   .tree > .node > .children{border-left:none;padding-left:20px;} /* no rail directly under a trust anchor */
-  .cross-hint{font-family:var(--mono);font-size:11px;color:var(--muted);
-    border:1px dashed var(--rail);border-radius:8px;padding:6px 10px;margin:0 0 8px;}
+  .cross-hint{font-family:var(--mono);font-size:11px;color:var(--xsign);
+    border:1px dashed var(--xsign);border-radius:8px;padding:6px 10px;margin:0 0 8px;background:var(--xsign-soft);}
   .grouphead{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
     color:var(--muted);margin:26px 0 8px;}
   .node{position:relative;}
@@ -72,6 +73,7 @@
   .b-warn{background:var(--warn-soft);color:var(--warn);}
   .b-bad{background:var(--bad-soft);color:var(--bad);}
   .b-dim{background:var(--bg);color:var(--muted);border-color:var(--line);}
+  .b-xsign{background:var(--xsign-soft);color:var(--xsign);}
   .meta{display:grid;grid-template-columns:88px 1fr;gap:2px 10px;margin-top:10px;
     font-size:12px;font-family:var(--mono);}
   .meta dt{color:var(--muted);}
@@ -150,7 +152,7 @@
     </dl>
   </section>
 
-  <p class="privacy">Client-side only: parsing and verification happen in this page via WebCrypto. Signature checks cover RSA (SHA-256/384/512) and ECDSA (P-256/P-384); other algorithms fall back to key-identifier / name matching, marked accordingly. Private keys are parsed only to compute their public key for matching and never leave the page.</p>
+  <p class="privacy">Client-side only: parsing and verification happen in this page via WebCrypto. Signature checks cover RSA PKCS#1 v1.5 and RSA-PSS (SHA-256/384/512), ECDSA (P-256/P-384/P-521), and Ed25519 (browser permitting); anything else falls back to key-identifier / name matching, marked accordingly. Private keys are parsed only to compute their public key for matching and never leave the page.</p>
 </div>
 
 <script>
@@ -224,6 +226,18 @@ const SIGALGS={
  "1.3.101.112":{kind:"Ed25519",label:"Ed25519"}
 };
 const CURVES={"1.2.840.10045.3.1.7":"P-256","1.3.132.0.34":"P-384","1.3.132.0.35":"P-521"};
+const HASH_OIDS={"1.3.14.3.2.26":"SHA-1","2.16.840.1.101.3.4.2.1":"SHA-256",
+ "2.16.840.1.101.3.4.2.2":"SHA-384","2.16.840.1.101.3.4.2.3":"SHA-512"};
+/* RSASSA-PSS-params: [0] hash (default SHA-1), [2] saltLength (default 20);
+   MGF assumed MGF1 with the same hash, which is all WebCrypto supports */
+function parsePssParams(sigAlgSeq){
+  let hash="SHA-1", saltLength=20;
+  for(const p of sigAlgSeq.children[1]?.children||[]){
+    if(p.tag===0xa0) hash=HASH_OIDS[oidStr(p.children[0].children[0])]||hash;
+    else if(p.tag===0xa2) saltLength=[...content(p.children[0])].reduce((a,b)=>(a<<8)|b,0);
+  }
+  return {hash, saltLength};
+}
 
 function parseCert(bytes, sourceName){
   const root=derParse(bytes)[0];
@@ -235,6 +249,7 @@ function parseCert(bytes, sourceName){
   // signature algorithm + value
   c.sigAlgOid=oidStr(sigAlgSeq.children[0]);
   c.sigAlg=SIGALGS[c.sigAlgOid]||{kind:"?",label:c.sigAlgOid};
+  if(c.sigAlgOid==="1.2.840.113549.1.1.10") c.pss=parsePssParams(sigAlgSeq);
   const sb=content(sigBits); c.sigValue=sb.slice(1); // skip unused-bits byte
 
   // tbs fields
@@ -305,16 +320,29 @@ async function verifySig(child, issuer){
       return await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, child.sigValue, child.tbsBytes)
         ? "ok" : "fail";
     }
-    if(alg.kind==="EC" && issuer.curve && issuer.curve!=="P-521"){
-      const size=issuer.curve==="P-256"?32:48;
+    if(alg.kind==="RSA-PSS" && child.pss && child.pss.hash!=="SHA-1"){
+      const key=await crypto.subtle.importKey("spki", issuer.spkiBytes,
+        {name:"RSA-PSS", hash:child.pss.hash}, false, ["verify"]);
+      return await crypto.subtle.verify({name:"RSA-PSS", saltLength:child.pss.saltLength},
+        key, child.sigValue, child.tbsBytes) ? "ok" : "fail";
+    }
+    if(alg.kind==="EC" && issuer.curve){
+      const size={"P-256":32,"P-384":48,"P-521":66}[issuer.curve];
+      if(!size) return "unsupported";
       const key=await crypto.subtle.importKey("spki", issuer.spkiBytes,
         {name:"ECDSA", namedCurve:issuer.curve}, false, ["verify"]);
       const raw=ecDerSigToRaw(child.sigValue, size);
       return await crypto.subtle.verify({name:"ECDSA", hash:alg.hash}, key, raw, child.tbsBytes)
         ? "ok" : "fail";
     }
+    if(alg.kind==="Ed25519"){ // raw 64-byte signature, no DER conversion
+      const key=await crypto.subtle.importKey("spki", issuer.spkiBytes,
+        {name:"Ed25519"}, false, ["verify"]);
+      return await crypto.subtle.verify("Ed25519", key, child.sigValue, child.tbsBytes)
+        ? "ok" : "fail";
+    }
     return "unsupported";
-  }catch(e){ return "unsupported"; }
+  }catch(e){ return "unsupported"; } // e.g. browser without Ed25519 support
 }
 
 /* ---------------- chain building ---------------- */
@@ -437,7 +465,7 @@ function cardHTML(c, childrenCount){
   const km=c.pubId && keys.find(k=>k.pubId===c.pubId);
   if(km) badges.push(`<span class="badge b-ok">private key: ${esc(km.names.join(", "))}</span>`);
   const sibs=certs.filter(x=>x.pubId===c.pubId && x!==c); // same key, different cert = cross-signed
-  if(sibs.length) badges.push(`<span class="badge b-role">cross-signed</span>`);
+  if(sibs.length) badges.push(`<span class="badge b-xsign">cross-signed</span>`);
   const cn=c.subject.map.CN||c.subject.map.O||c.subject.str||"(no subject)";
   return `<div class="card">
     <div class="cn">${esc(cn)}</div>

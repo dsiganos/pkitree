@@ -7,8 +7,9 @@ HTML file (index.html), zero dependencies, deployed via GitHub Pages.
 - Hand-rolled DER/ASN.1 parser (no external libs — keep it that way)
 - Chain building: AKI ⇒ SKI key-identifier match first, issuer/subject
   DN match as fallback
-- Signature verification via WebCrypto: RSA SHA-256/384/512,
-  ECDSA P-256/P-384; others fall back to "name match only" labelling
+- Signature verification via WebCrypto: RSA PKCS#1 v1.5 + PSS
+  (SHA-256/384/512), ECDSA P-256/P-384/P-521, Ed25519; SHA-1 and
+  unknown algs fall back to "name match only" labelling
 - "Load demo chains" generates two multi-branch ECDSA PKIs in-browser
   (root, two intermediates, device/web/www leaves incl. an expired and
   a soon-expiring one, plus device private keys) with a minimal DER

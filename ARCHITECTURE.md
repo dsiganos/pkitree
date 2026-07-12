@@ -51,9 +51,12 @@ beyond the `certs[]` and `keys[]` arrays.
 WebCrypto (`crypto.subtle.verify`) on the raw `tbsCertificate` bytes:
 
 - RSA PKCS#1 v1.5 with SHA-256/384/512
-- ECDSA P-256/P-384 (DER signature converted to raw r‖s first)
-- Everything else (SHA-1, RSA-PSS, Ed25519, P-521) → link labelled
-  "matched by name only"; SHA-1 additionally badged as weak
+- RSA-PSS (params parsed from the AlgorithmIdentifier: hash + salt)
+- ECDSA P-256/P-384/P-521 (DER signature converted to raw r‖s first)
+- Ed25519 (raw 64-byte signature; older browsers without WebCrypto
+  Ed25519 fall back gracefully)
+- Everything else (SHA-1, Ed448…) → link labelled "matched by name
+  only"; SHA-1 additionally badged as weak
 
 A link therefore has two independent properties: *how it matched*
 (AKI⇒SKI vs DN) and *whether the signature verified* (✓ / ✗ / n.a.).

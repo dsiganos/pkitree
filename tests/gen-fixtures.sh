@@ -37,4 +37,14 @@ rm -f mtls-*.csr mtls-*.srl
 openssl crl2pkcs7 -nocrl -certfile mtls-ca-bundle.pem -out bundle.p7b -outform DER
 openssl crl2pkcs7 -nocrl -certfile mtls-ca-bundle.pem -out bundle-p7.pem
 
+# additional signature algorithms: P-521, Ed25519 (x2 for a negative), RSA-PSS
+openssl ecparam -name secp521r1 -genkey -noout -out p521.key
+openssl req -x509 -key p521.key -out p521.crt -days 3650 -subj "/CN=p521-test" 2>/dev/null
+openssl genpkey -algorithm ED25519 -out ed25519.key
+openssl req -x509 -key ed25519.key -out ed25519.crt -days 3650 -subj "/CN=ed25519-test" 2>/dev/null
+openssl genpkey -algorithm ED25519 -out ed25519-b.key
+openssl req -x509 -key ed25519-b.key -out ed25519-b.crt -days 3650 -subj "/CN=ed25519-b" 2>/dev/null
+openssl req -x509 -newkey rsa:2048 -keyout rsa-pss.key -out rsa-pss.crt -days 3650 -nodes \
+  -subj "/CN=pss-test" -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 2>/dev/null
+
 echo "fixtures regenerated"

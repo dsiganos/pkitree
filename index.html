@@ -86,6 +86,7 @@
   .compact .card .cn{font-size:13px;}
   .compact .badges{margin-top:0;}
   .compact .link-note .linktext{display:none;}
+  .compact .card:focus-visible{outline:2px solid var(--accent);outline-offset:2px;}
   .compact .card.focus{display:block;}
   .compact .card.focus .dn{display:block;}
   .compact .card.focus .meta{display:grid;}
@@ -123,7 +124,7 @@
       <button id="pastebtn">Paste PEM</button>
       <button id="demobtn">Load demo chains</button>
       <button id="pubcabtn">Match public CAs</button>
-      <button id="compactbtn">Compact view</button>
+      <button id="compactbtn" aria-pressed="false">Compact view</button>
       <button id="clearbtn">Clear all</button>
     </div>
   </div>
@@ -583,6 +584,7 @@ async function render(){
   $("s-issues").textContent=issues;
   $("s-keys").textContent=keys.length-unmatchedKeys.length;
   $("summary").style.display="flex";
+  applyCompactA11y(); // re-renders replace the cards; restore keyboard attributes in compact mode
 }
 
 /* ---------------- input handling ---------------- */
@@ -777,15 +779,39 @@ $("parsepaste").addEventListener("click",async()=>{
   $("pastearea").value=""; await render();
 });
 $("clearbtn").addEventListener("click",async()=>{ certs.length=0; seen.clear(); keys.length=0; await render(); toast("Cleared.","info"); });
+/* compact-mode cards act as buttons: focusable, Enter/Space to expand, ARIA state */
+function applyCompactA11y(){
+  const forest=$("forest"), on=forest.classList.contains("compact");
+  for(const card of forest.querySelectorAll?.(".card")||[]){
+    if(on){
+      card.setAttribute("tabindex","0"); card.setAttribute("role","button");
+      card.setAttribute("aria-expanded", card.classList.contains("focus")?"true":"false");
+    } else {
+      card.removeAttribute("tabindex"); card.removeAttribute("role"); card.removeAttribute("aria-expanded");
+    }
+  }
+}
+function toggleCardFocus(card){
+  card.setAttribute("aria-expanded", card.classList.toggle("focus")?"true":"false");
+}
+function compactCardOf(e){
+  if(!$("forest").classList.contains("compact")) return null;
+  if(e.target.closest("details.raw")) return null; // let the full-details expander work inside a focused card
+  return e.target.closest(".card");
+}
 $("compactbtn").addEventListener("click",()=>{
   const on=$("forest").classList.toggle("compact");
   $("compactbtn").textContent=on?"Full view":"Compact view";
+  $("compactbtn").setAttribute("aria-pressed", on?"true":"false");
+  applyCompactA11y();
 });
 $("forest").addEventListener("click",e=>{
-  if(!$("forest").classList.contains("compact")) return;
-  if(e.target.closest("details.raw")) return; // let the full-details expander work inside a focused card
-  const card=e.target.closest(".card");
-  if(card) card.classList.toggle("focus");
+  const card=compactCardOf(e); if(card) toggleCardFocus(card);
+});
+$("forest").addEventListener("keydown",e=>{
+  if(e.key!=="Enter" && e.key!==" ") return;
+  const card=compactCardOf(e);
+  if(card && e.target===card){ e.preventDefault(); toggleCardFocus(card); }
 });
 
 /* ---------------- public CA matching (Mozilla roots + CCADB intermediates) ----------------

@@ -48,6 +48,7 @@
 
   .forest{margin-top:14px;}
   .tree + .tree{border-top:1px solid var(--line);margin-top:22px;padding-top:16px;}
+  .tree > .node > .children{border-left:none;padding-left:20px;} /* no rail directly under a trust anchor */
   .cross-hint{font-family:var(--mono);font-size:11px;color:var(--muted);
     border:1px dashed var(--rail);border-radius:8px;padding:6px 10px;margin:0 0 8px;}
   .grouphead{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;

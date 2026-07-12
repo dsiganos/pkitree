@@ -9,8 +9,10 @@ HTML file (index.html), zero dependencies, deployed via GitHub Pages.
   DN match as fallback
 - Signature verification via WebCrypto: RSA SHA-256/384/512,
   ECDSA P-256/P-384; others fall back to "name match only" labelling
-- "Load demo chains" generates two 3-tier ECDSA PKIs in-browser with a
-  minimal DER writer, including leaf private keys to demo key matching
+- "Load demo chains" generates two multi-branch ECDSA PKIs in-browser
+  (root, two intermediates, device/web/www leaves incl. an expired and
+  a soon-expiring one, plus device private keys) with a minimal DER
+  writer
 - Private keys (PKCS#8 / PKCS#1 / SEC1, PEM or DER) are parsed locally
   and matched to certs by public key; encrypted keys are unsupported
 - "Match public CAs" completes chains from roots.pem (curl.se Mozilla

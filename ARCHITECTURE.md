@@ -80,10 +80,13 @@ a chain are added; the pool itself is never displayed.
 ## Demo generator
 
 A minimal DER *writer* (TLV, OID, Name, UTCTime) plus WebCrypto keygen
-and signing builds two 3-tier hierarchies in-browser: Alpha Corp
-(P-256/SHA-256) and Beta Corp (P-384/SHA-384), with correct SKI/AKI
-linkage so verification genuinely passes. Each leaf's private key is
-exported as PKCS#8 and fed through the normal key-matching path.
+and signing builds two hierarchies in-browser: Alpha Corp
+(P-256/SHA-256) and Beta Corp (P-384/SHA-384). Each has a root with
+two intermediates (Issuing CA, TLS CA) and four leaves — including an
+expired and a soon-expiring cert to exercise the badges — with correct
+SKI/AKI linkage so verification genuinely passes. Each device leaf's
+private key is exported as PKCS#8 and fed through the normal
+key-matching path.
 
 ## Security / privacy model
 

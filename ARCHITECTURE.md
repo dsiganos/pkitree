@@ -100,11 +100,24 @@ badge, the dashed anchor hint, and self-signed parent preference.
 
 ## Testing
 
-No test harness in-repo. Parser changes are validated against real
-OpenSSL-generated material by extracting the page's `<script>` and
-running it in Node (`vm.runInThisContext` + a DOM stub) — Node ≥ 19
-provides the same WebCrypto API. See CLAUDE.md constraint: always test
-against real OpenSSL output, not just the in-browser demo certs.
+`make test` — offline, Node ≥ 19 (same WebCrypto as the browser),
+openssl for the tool test. `tests/harness.mjs` extracts the page's
+`<script>` and runs it in the Node realm via `vm.runInThisContext`
+with a minimal DOM stub, so suites call the app's real functions:
+
+| Suite | Covers |
+|---|---|
+| `keys.test.mjs` | key parsing/matching vs OpenSSL fixtures, dedupe/filename merge |
+| `demo.test.mjs` | demo PKIs: shape, signatures, expiry, cross-sign, rendering |
+| `details.test.mjs` | extension decoding, fingerprint, PEM round-trip |
+| `pubca.test.mjs` | chain completion from roots/intermediates.pem (skips if absent) |
+| `tool.test.mjs` | fetch-chain vs local mTLS s_server, castore + cross-sign completion |
+
+Fixtures in `tests/fixtures/` are real OpenSSL output (10-year
+validity), regenerable with `tests/gen-fixtures.sh`; plus checked-in
+public certs (github leaf, GTS Root R1 variants) for the cross-signing
+cases. See CLAUDE.md constraint: always test against real OpenSSL
+output, not just the in-browser demo certs.
 
 ## Deployment
 

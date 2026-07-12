@@ -1,6 +1,11 @@
 REPO := dsiganos/pkitree
 
-.PHONY: help pages-status pages-url open lint commit deploy refresh-cas
+.PHONY: help pages-status pages-url open lint commit deploy refresh-cas test
+
+test: ## Run the test suite (Node ≥ 19; openssl for the tool test)
+	@fail=0; for t in tests/*.test.mjs; do \
+		echo "== $$t"; node $$t || fail=1; \
+	done; exit $$fail
 
 help:
 	@grep -E '^[a-zA-Z_-]+:.*?##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-16s %s\n", $$1, $$2}'

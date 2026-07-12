@@ -114,7 +114,7 @@
 
   <div class="drop" id="drop" role="button" tabindex="0" aria-label="Add certificate files">
     <div class="big">Drop certificate files here</div>
-    <div class="sub">.pem .crt .cer .der .key — bundles are fine; private keys are matched to their certs</div>
+    <div class="sub">.pem .crt .cer .der .p7b .key — bundles are fine; private keys are matched to their certs</div>
     <div class="rowbtns" style="justify-content:center">
       <button class="primary" id="browse">Choose files</button>
       <button id="pastebtn">Paste PEM</button>
@@ -542,7 +542,30 @@ function pemBlocks(text){
     for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
     out.push(u);
   }
+  // PKCS#7 PEM bundles carry certs too
+  const re7=/-----BEGIN PKCS7-----([\s\S]*?)-----END PKCS7-----/g;
+  while((m=re7.exec(text))){
+    const b64=m[1].replace(/[^A-Za-z0-9+/=]/g,"");
+    const bin=atob(b64); const u=new Uint8Array(bin.length);
+    for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i);
+    out.push(...p7bCerts(u));
+  }
   return out;
+}
+/* PKCS#7/CMS SignedData (.p7b): extract the certificate bag */
+function p7bCerts(bytes){
+  try{
+    const root=derParse(bytes)[0];
+    if(!root || root.tag!==0x30 || !root.children) return [];
+    if(oidStr(root.children[0])!=="1.2.840.113549.1.7.2") return []; // not signedData
+    const signed=root.children[1]?.children?.[0]; // content [0] EXPLICIT → SignedData
+    const out=[];
+    for(const ch of signed?.children||[]){
+      if(ch.tag===0xa0 && ch.children) // certificates [0] IMPLICIT CertificateSet
+        for(const cert of ch.children) if(cert.tag===0x30) out.push(slice(cert));
+    }
+    return out;
+  }catch(e){ return []; }
 }
 /* ---------------- private keys: parse locally, match to certs by public key ---------------- */
 const keys=[]; // {name, info, pubId}
@@ -635,8 +658,13 @@ async function ingestFile(file){
   } else if(buf[0]===0x30){
     const r=addCertBytes(buf,file.name);
     if(r>0) added++;
-    else if(r<0){ // not a cert — try it as a DER private key
-      try{ if(await addKey(buf,file.name)) keysAdded++; }catch(e){ failed++; }
+    else if(r<0){ // not a cert — try DER PKCS#7 bundle, then DER private key
+      const p7=p7bCerts(buf);
+      if(p7.length){
+        for(const b of p7){ const rr=addCertBytes(b,file.name); if(rr>0)added++; if(rr<0)failed++; }
+      } else {
+        try{ if(await addKey(buf,file.name)) keysAdded++; }catch(e){ failed++; }
+      }
     }
   } else failed++;
   return {added,failed,keysAdded,encrypted};

@@ -33,4 +33,8 @@ openssl x509 -req -in mtls-client.csr -CA mtls-inter.crt -CAkey mtls-inter.key -
 cat mtls-root.crt mtls-inter.crt > mtls-ca-bundle.pem
 rm -f mtls-*.csr mtls-*.srl
 
+# PKCS#7 bundles (DER and PEM) for .p7b ingestion
+openssl crl2pkcs7 -nocrl -certfile mtls-ca-bundle.pem -out bundle.p7b -outform DER
+openssl crl2pkcs7 -nocrl -certfile mtls-ca-bundle.pem -out bundle-p7.pem
+
 echo "fixtures regenerated"

@@ -8,6 +8,7 @@
 // Zero dependencies; Node ≥ 16.
 
 import tls from "node:tls";
+import net from "node:net";
 import fs from "node:fs";
 import path from "node:path";
 import process from "node:process";
@@ -21,6 +22,7 @@ const SYSTEM_BUNDLES = [
 ];
 
 const USAGE = `usage: fetch-chain.mjs <host>[:port] [options]
+       (IPv6: fetch-chain.mjs [2001:db8::1]:8443 or a bare address)
 
 options:
   --port <n>        port if not given as host:port     (default 443)
@@ -65,7 +67,12 @@ function parseArgs(argv) {
     }
   }
   if (pos.length !== 1) fail(`expected exactly one host argument\n\n${USAGE}`);
-  const [host, port] = pos[0].split(":");
+  // host forms: name, name:port, [v6]:port, [v6], bare v6 (no port possible)
+  let host, port;
+  const bracketed = pos[0].match(/^\[([^\]]+)\](?::(\d+))?$/);
+  if (bracketed) [, host, port] = bracketed;
+  else if ((pos[0].match(/:/g) || []).length > 1) host = pos[0]; // bare IPv6
+  else [host, port] = pos[0].split(":");
   opts.host = host;
   if (port) opts.port = Number(port);
   if (!Number.isInteger(opts.port) || opts.port < 1 || opts.port > 65535)
@@ -204,7 +211,7 @@ function main() {
   const socket = tls.connect({
     host: opts.host,
     port: opts.port,
-    servername: opts.sni ?? opts.host,
+    servername: opts.sni ?? (net.isIP(opts.host) ? undefined : opts.host), // RFC 6066: no IP literals in SNI
     rejectUnauthorized: false,
     cert: opts.cert && readFileOr(opts.cert, "client certificate"),
     key: opts.key && readFileOr(opts.key, "client key"),

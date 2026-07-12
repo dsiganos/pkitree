@@ -47,9 +47,21 @@ try {
 // (import the tool as a library by swapping main() for exports)
 const libPath = path.join(os.tmpdir(), `fc-lib-${process.pid}.mjs`);
 fs.writeFileSync(libPath, fs.readFileSync(TOOL, "utf8")
-  .replace(/^main\(\);$/m, "export { completeChain };"));
-const { completeChain } = await import(libPath);
+  .replace(/^main\(\);$/m, "export { completeChain, parseArgs };"));
+const { completeChain, parseArgs } = await import(libPath);
 fs.unlinkSync(libPath);
+
+// --- host:port parsing incl. IPv6 -----------------------------------------
+for (const [arg, host, port] of [
+  ["example.com", "example.com", 443],
+  ["example.com:8443", "example.com", 8443],
+  ["[::1]:8443", "::1", 8443],
+  ["[2001:db8::1]", "2001:db8::1", 443],
+  ["2001:db8::1", "2001:db8::1", 443],
+]) {
+  const o = parseArgs([arg]);
+  check(o.host === host && o.port === port, `parse ${arg} → ${o.host}:${o.port}`);
+}
 
 const { X509Certificate } = await import("node:crypto");
 const rec = (f) => {

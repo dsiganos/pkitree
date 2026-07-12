@@ -52,6 +52,8 @@ refresh-cas: ## Refresh roots.pem + intermediates.pem from Mozilla data
 
 deploy: ## Push and wait for GitHub Pages to build this exact commit
 	git push
+	@# explicitly request a build: pushes that land mid-rebuild get dropped by Pages
+	@gh api -X POST repos/$(REPO)/pages/builds --jq '.status' || true
 	@sha=$$(git rev-parse HEAD); \
 	echo "Waiting for Pages to build $$sha..."; \
 	for i in $$(seq 1 24); do \

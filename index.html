@@ -744,7 +744,7 @@ $("demobtn").addEventListener("click", async ()=>{
     for(const [bytes,name] of demo.certs) addCertBytes(bytes,name);
     for(const [bytes,name] of demo.keys) await addKey(bytes,name);
     await render();
-    toast("Demo chains loaded — Alpha Corp (P-256) and Beta Corp (P-384): two intermediates each, device keys, an expired and a soon-expiring cert.","info");
+    toast("Demo chains loaded — Alpha Corp (P-256) and Beta Corp (P-384): two intermediates each, device keys, expired/expiring certs, and Alpha's root cross-signed by Beta.","info");
   }catch(e){ toast("Demo generation failed: "+e.message,"err"); }
 });
 
@@ -778,7 +778,7 @@ async function makeDemoChains(){
     const [rootK,intK,tlsK,d1K,d2K,webK,wwwK]=await Promise.all([mk(),mk(),mk(),mk(),mk(),mk(),mk()]);
     const sigAlg=tlv(0x30,[...derOID(sigOID)]);
     const day=864e5;
-    async function issue(subjCN,subjKey,issuerCN,issuerKey,isCA,skiByte,akiByte,fromDays=-1,toDays=365){
+    async function issue(subjCN,subjKey,issuerCN,issuerKey,isCA,skiByte,akiByte,fromDays=-1,toDays=365,subjO=org){
       const exts=[];
       exts.push(tlv(0x30,[...derOID("2.5.29.19"),...tlv(4,[...tlv(0x30,isCA?[...tlv(1,[255])]:[])])]));
       exts.push(tlv(0x30,[...derOID("2.5.29.14"),...tlv(4,[...tlv(4,new Array(20).fill(skiByte))])]));
@@ -789,7 +789,7 @@ async function makeDemoChains(){
         ...tlv(0xa0,[...tlv(2,[2])]), ...tlv(2,[serial++]), ...sigAlg,
         ...derName(issuerCN,org),
         ...tlv(0x30,[...derTimeEnc(from),...derTimeEnc(to)]),
-        ...derName(subjCN,org), ...(await spki(subjKey)),
+        ...derName(subjCN,subjO), ...(await spki(subjKey)),
         ...tlv(0xa3,[...tlv(0x30,exts.reduce((a,e)=>[...a,...e],[]))])
       ]);
       const raw=new Uint8Array(await crypto.subtle.sign({name:"ECDSA",hash},issuerKey.privateKey,tbs));
@@ -806,12 +806,17 @@ async function makeDemoChains(){
       [await issue(`www.${slug}.demo`,        wwwK,  `${org} TLS CA`,     tlsK,  false, S+6, S+2),  org],
     ];
     const leafKey=new Uint8Array(await crypto.subtle.exportKey("pkcs8",d1K.privateKey));
-    return {certs, key:[leafKey, `${slug}-device.key`]};
+    // crossSign: issue a CA cert for a FOREIGN subject+key under this org's root
+    const crossSign=(subjCN,subjO,subjKey,skiByte)=>
+      issue(subjCN,subjKey,`${org} Root CA`,rootK,true,skiByte,S,-1,365,subjO);
+    return {certs, key:[leafKey, `${slug}-device.key`], rootK, crossSign};
   }
 
   const c1=await buildChain("P-256","SHA-256","1.2.840.10045.4.3.2","Alpha Corp",0xA0);
   const c2=await buildChain("P-384","SHA-384","1.2.840.10045.4.3.3","Beta Corp", 0xB0);
-  return {certs:[...c1.certs,...c2.certs], keys:[c1.key,c2.key]};
+  // Beta cross-signs Alpha's root key (algorithm-migration style: P-384 CA vouching for a P-256 key)
+  const cross=await c2.crossSign("Alpha Corp Root CA","Alpha Corp",c1.rootK,0xA0);
+  return {certs:[...c1.certs,...c2.certs,[cross,"Beta Corp"]], keys:[c1.key,c2.key]};
 }
 </script>
 </body>

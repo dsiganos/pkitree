@@ -86,7 +86,9 @@ two intermediates (Issuing CA, TLS CA) and four leaves — including an
 expired and a soon-expiring cert to exercise the badges — with correct
 SKI/AKI linkage so verification genuinely passes. Each device leaf's
 private key is exported as PKCS#8 and fed through the normal
-key-matching path.
+key-matching path. Beta's root also cross-signs Alpha's root key
+(P-384 CA vouching for a P-256 key), exercising the cross-signed
+badge, the dashed anchor hint, and self-signed parent preference.
 
 ## Security / privacy model
 

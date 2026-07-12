@@ -47,6 +47,9 @@
   .summary b{color:var(--ink);font-size:16px;display:block;font-weight:600;}
 
   .forest{margin-top:14px;}
+  .tree + .tree{border-top:1px solid var(--line);margin-top:22px;padding-top:16px;}
+  .cross-hint{font-family:var(--mono);font-size:11px;color:var(--muted);
+    border:1px dashed var(--rail);border-radius:8px;padding:6px 10px;margin:0 0 8px;}
   .grouphead{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;
     color:var(--muted);margin:26px 0 8px;}
   .node{position:relative;}
@@ -482,13 +485,17 @@ async function render(){
   let html="";
   if(trueRoots.length){
     html+=`<div class="grouphead">Trust anchors (${trueRoots.length})</div>`;
-    html+=trueRoots.map(r=>renderNode(r,forest,links)).join("");
+    html+=trueRoots.map(r=>{
+      const sibs=certs.filter(x=>x.pubId===r.pubId && x!==r);
+      const hint=sibs.length?`<div class="cross-hint">⌁ same CA key as the cross-signed variant issued by ${esc(sibs.map(s=>s.issuer.str).join(" · "))}</div>`:"";
+      return `<div class="tree">${hint}${renderNode(r,forest,links)}</div>`;
+    }).join("");
   }
   if(orphans.length){
     html+=`<div class="grouphead">Incomplete chains — issuer not loaded (${orphans.length})</div>`;
     html+=orphans.map(o=>{
-      return `<div class="link-note">missing issuer: <b>${esc(o.issuer.str)}</b>${o.aki?` (AKI ${o.aki.slice(0,16)}…)`:""}</div>`
-        + renderNode(o,forest,links);
+      return `<div class="tree"><div class="link-note">missing issuer: <b>${esc(o.issuer.str)}</b>${o.aki?` (AKI ${o.aki.slice(0,16)}…)`:""}</div>`
+        + renderNode(o,forest,links)+`</div>`;
     }).join("");
   }
   const unmatchedKeys=keys.filter(k=>!certs.some(c=>c.pubId===k.pubId));

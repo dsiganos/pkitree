@@ -21,7 +21,8 @@ HTML file (index.html), zero dependencies, deployed via GitHub Pages.
 - "Match public CAs" completes chains from roots.pem (curl.se Mozilla
   bundle) + intermediates.pem (Mozilla Remote Settings preload list),
   fetched same-origin (CCADB itself has no CORS); only certs that
-  complete a loaded chain are added. Refresh via `make refresh-cas`
+  complete a loaded chain are added. Refresh via `make refresh-cas`,
+  also run weekly by the refresh-cas GitHub Action
 
 ## Constraints
 - App stays a single HTML file with no build step (Pages serves it

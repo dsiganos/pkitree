@@ -133,6 +133,8 @@ output, not just the in-browser demo certs.
 ## Deployment
 
 GitHub Pages serves the repo root, branch `main`, no build. `make
-deploy` pushes and polls the Pages API until the rebuild reports
-`built`. `make refresh-cas` should be run periodically (and committed)
-to keep the CA snapshots current.
+deploy` pushes, requests a Pages build explicitly (pushes landing
+mid-rebuild get dropped), and polls until this commit reports `built`.
+The `refresh-cas` GitHub Action refreshes the CA snapshots weekly,
+running the test suite against the fresh data before committing;
+`make refresh-cas` does the same locally.

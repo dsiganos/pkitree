@@ -1,0 +1,40 @@
+name: refresh-cas
+
+# Weekly refresh of roots.pem / intermediates.pem from Mozilla data.
+# Runs the test suite against the fresh files before committing; the
+# pubca suite acts as a tripwire if the new data stops completing chains.
+
+on:
+  schedule:
+    - cron: "0 4 * * 1" # Mondays 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: make refresh-cas
+      - run: make test
+      - name: Commit and push if changed
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet roots.pem intermediates.pem; then
+            echo "CA files unchanged"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add roots.pem intermediates.pem
+          git commit -m "Refresh CA data files (scheduled)"
+          git push
+          # GITHUB_TOKEN pushes don't reliably trigger Pages; request a build explicitly
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/pages/builds" || true

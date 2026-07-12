@@ -6,7 +6,8 @@ HTML file (index.html), zero dependencies, deployed via GitHub Pages.
 ## Architecture
 - Hand-rolled DER/ASN.1 parser (no external libs — keep it that way)
 - Chain building: AKI ⇒ SKI key-identifier match first, issuer/subject
-  DN match as fallback
+  DN match as fallback; a post-pass adds ⚠ chain-quality warnings
+  (expired issuer, CA:FALSE issuer, no keyCertSign, pathlen exceeded)
 - Signature verification via WebCrypto: RSA PKCS#1 v1.5 + PSS
   (SHA-256/384/512), ECDSA P-256/P-384/P-521, Ed25519; SHA-1 and
   unknown algs fall back to "name match only" labelling

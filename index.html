@@ -61,6 +61,7 @@
   .link-note::before{content:"";display:inline-block;width:14px;height:2px;background:var(--rail);}
   .link-note .v-ok{color:var(--ok);font-weight:600}
   .link-note .v-dn{color:var(--warn);font-weight:600}
+  .link-note .v-warn{color:var(--warn);font-weight:600}
 
   .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;
     margin:6px 0 14px;box-shadow:0 1px 2px rgba(27,36,48,.05);}
@@ -149,6 +150,7 @@
       <dt>AKI ⇒ SKI</dt><dd>A link made because <span class="mono">child.AKI = parent.SKI</span>. The most reliable match — immune to name collisions and CA key rollover, where a renewed CA keeps the same name but a new key.</dd>
       <dt>DN match</dt><dd>Fallback when key identifiers are missing: the child's issuer name equals the parent's subject name. Weaker, since names can repeat.</dd>
       <dt>✓ / ✗</dt><dd>The label says <em>who</em> the parent is claimed to be; the tick means the signature was actually verified against the parent's public key. A self-signed root has no AKI, or an AKI equal to its own SKI.</dd>
+      <dt>⚠</dt><dd>Chain-quality warning — the signature may be valid, but a real validator would reject the path: expired or not-yet-valid issuer, CA:FALSE issuer, issuer without <span class="mono">keyCertSign</span>, or a <span class="mono">pathlen</span> constraint exceeded.</dd>
     </dl>
   </section>
 
@@ -291,9 +293,15 @@ function parseCert(bytes, sourceName){
           for(const p of (inner[0].children||[])) if(p.tag===0x80) c.aki=hex(content(p));
         }
         else if(eoid==="2.5.29.19"){
-          const bc=inner[0];
-          if(bc.children && bc.children.length && bc.children[0].tag===0x01)
-            c.isCA=content(bc.children[0])[0]!==0;
+          for(const x of inner[0].children||[]){
+            if(x.tag===0x01) c.isCA=content(x)[0]!==0;
+            else if(x.tag===0x02) c.pathLen=[...content(x)].reduce((a,b)=>(a<<8)|b,0);
+          }
+        }
+        else if(eoid==="2.5.29.15"){
+          const b=content(inner[0]); c.keyUsage=[];
+          for(let q=1;q<b.length;q++) for(let j2=7;j2>=0;j2--)
+            if(b[q]&(1<<j2)) c.keyUsage.push(KU_BITS[(q-1)*8+(7-j2)]||("bit"+((q-1)*8+(7-j2))));
         }
       }
     }
@@ -376,7 +384,35 @@ async function buildForest(){
   const hasParent=id=>links.has(id);
   const roots=certs.filter(c=>!hasParent(c.id) && (c.selfIssued||c.isCA||true)).filter(c=>!hasParent(c.id));
   const childrenOf=p=>certs.filter(c=>links.get(c.id)?.parent===p);
-  return {links, roots:roots.filter(c=>!links.has(c.id)), childrenOf};
+  const forest={links, roots:roots.filter(c=>!links.has(c.id)), childrenOf};
+  addChainWarnings(forest);
+  return forest;
+}
+
+/* chain-quality warnings: rules a real validator enforces beyond the signature.
+   A valid ✓ only proves who signed; these flag paths a browser would reject. */
+function addChainWarnings(forest){
+  const now=new Date();
+  function walk(c, budgets){
+    let b=budgets;
+    if(c.isCA && c.pathLen!=null)
+      b=[...budgets,{owner:c.subject.map.CN||c.subject.str, max:c.pathLen, left:c.pathLen}];
+    for(const k of forest.childrenOf(c)){
+      const l=forest.links.get(k.id); if(!l) continue;
+      const w=l.warns=[];
+      if(c.notAfter<now) w.push(`issuer expired ${fmtDate(c.notAfter)}`);
+      if(c.notBefore>now) w.push(`issuer not valid until ${fmtDate(c.notBefore)}`);
+      if(!c.isCA) w.push("issuer is not a CA (CA:FALSE)");
+      if(c.keyUsage && !c.keyUsage.includes("keyCertSign")) w.push("issuer keyUsage lacks keyCertSign");
+      let kb=b;
+      if(k.isCA && !k.selfIssued){ // an intermediate consumes one pathlen level of every ancestor budget
+        for(const x of b) if(x.left<=0) w.push(`pathlen exceeded (${x.owner} pathlen:${x.max})`);
+        kb=b.map(x=>({...x, left:x.left-1}));
+      }
+      walk(k, kb);
+    }
+  }
+  for(const r of forest.roots) walk(r, []);
 }
 
 /* ---------------- rendering ---------------- */
@@ -490,7 +526,9 @@ function linkNoteHTML(link){
   if(link.verify==="ok"){ tick=`<span class="v-ok">✓</span>`; text=`<span class="v-ok">signature verified</span>`; }
   else if(link.verify==="fail"){ tick=`<span class="v-dn" style="color:var(--bad)">✗</span>`; text=`<span class="v-dn" style="color:var(--bad)">SIGNATURE INVALID</span>`; }
   else { tick=`<span class="v-dn">•</span>`; text=`<span class="v-dn">matched by name only (alg not verifiable in browser)</span>`; }
-  return `<div class="link-note">${tick}<span class="linktext">${esc(link.how)} · ${text}</span></div>`;
+  const warn=link.warns?.length?`<span class="v-warn">⚠</span>`:"";
+  const warntext=link.warns?.length?` · <span class="v-warn">${esc(link.warns.join(" · "))}</span>`:"";
+  return `<div class="link-note">${tick}${warn}<span class="linktext">${esc(link.how)} · ${text}${warntext}</span></div>`;
 }
 function renderNode(c, forest, links){
   const kids=forest.childrenOf(c);
@@ -535,7 +573,8 @@ async function render(){
   el.innerHTML=html;
 
   let verified=0, issues=0; const now=new Date();
-  for(const l of links.values()){ if(l.verify==="ok") verified++; if(l.verify==="fail") issues++; }
+  for(const l of links.values()){ if(l.verify==="ok") verified++; if(l.verify==="fail") issues++;
+    issues+=l.warns?.length||0; }
   for(const c of certs){ if(c.notAfter<now) issues++; }
   issues+=orphans.length;
   $("s-total").textContent=certs.length;

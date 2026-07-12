@@ -61,6 +61,14 @@ WebCrypto (`crypto.subtle.verify`) on the raw `tbsCertificate` bytes:
 A link therefore has two independent properties: *how it matched*
 (AKI⇒SKI vs DN) and *whether the signature verified* (✓ / ✗ / n.a.).
 
+After links are built, a chain-quality pass (`addChainWarnings`) walks
+each tree top-down and flags conditions a real validator rejects even
+when the signature is valid, marked ⚠ on the link: expired or
+not-yet-valid issuer, CA:FALSE issuer, issuer keyUsage without
+keyCertSign, and pathLenConstraint budgets exceeded (each intermediate
+consumes one level of every ancestor's budget). A ✓ answers "did this
+key sign that cert"; the ⚠s answer "would a browser accept this path".
+
 ## Private keys
 
 Accepted: PKCS#8, PKCS#1 (RSA), SEC1 (EC) — PEM or DER. Encrypted keys

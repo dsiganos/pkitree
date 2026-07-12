@@ -47,4 +47,25 @@ openssl req -x509 -key ed25519-b.key -out ed25519-b.crt -days 3650 -subj "/CN=ed
 openssl req -x509 -newkey rsa:2048 -keyout rsa-pss.key -out rsa-pss.crt -days 3650 -nodes \
   -subj "/CN=pss-test" -sha256 -sigopt rsa_padding_mode:pss -sigopt rsa_pss_saltlen:32 2>/dev/null
 
+# chain-quality violation fixtures
+# pathlen:0 root that (wrongly) has a subordinate CA
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -keyout plroot.key -out plroot.crt -days 3650 -nodes \
+  -subj "/CN=Pathlen0 Root" -addext "basicConstraints=critical,CA:TRUE,pathlen:0" 2>/dev/null
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -keyout plsub.key -out plsub.csr -nodes -subj "/CN=Bad Sub CA" 2>/dev/null
+openssl x509 -req -in plsub.csr -CA plroot.crt -CAkey plroot.key -CAcreateserial -out plsub.crt -days 3650 \
+  -extfile /dev/stdin <<CNF 2>/dev/null
+basicConstraints=critical,CA:TRUE
+CNF
+# CA:FALSE cert that (wrongly) issued a child
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -keyout noca.key -out noca.crt -days 3650 -nodes \
+  -subj "/CN=Not A CA" -addext "basicConstraints=critical,CA:FALSE" 2>/dev/null
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -keyout nocachild.key -out nocachild.csr -nodes -subj "/CN=child-of-nonca" 2>/dev/null
+openssl x509 -req -in nocachild.csr -CA noca.crt -CAkey noca.key -CAcreateserial -out nocachild.crt -days 3650 2>/dev/null
+# CA whose keyUsage lacks keyCertSign, with a child
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -keyout kuca.key -out kuca.crt -days 3650 -nodes \
+  -subj "/CN=No CertSign CA" -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,digitalSignature" 2>/dev/null
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -keyout kuchild.key -out kuchild.csr -nodes -subj "/CN=child-of-kuca" 2>/dev/null
+openssl x509 -req -in kuchild.csr -CA kuca.crt -CAkey kuca.key -CAcreateserial -out kuchild.crt -days 3650 2>/dev/null
+rm -f *.csr *.srl
+
 echo "fixtures regenerated"

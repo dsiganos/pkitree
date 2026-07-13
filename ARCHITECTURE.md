@@ -95,7 +95,9 @@ and signing builds two hierarchies in-browser: Alpha Corp
 (P-256/SHA-256) and Beta Corp (P-384/SHA-384). Each has a root with
 two intermediates (Issuing CA, TLS CA) and four leaves — including an
 expired and a soon-expiring cert to exercise the badges — with correct
-SKI/AKI linkage so verification genuinely passes. Each device leaf's
+SKI/AKI linkage so verification genuinely passes. Alpha's TLS CA is
+itself expired, so its still-valid www leaf shows how an expired issuer
+propagates a chain-quality warning down to an otherwise-good cert. Each device leaf's
 private key is exported as PKCS#8 and fed through the normal
 key-matching path. Beta's root also cross-signs Alpha's root key
 (P-384 CA vouching for a P-256 key), exercising the cross-signed

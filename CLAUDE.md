@@ -13,7 +13,9 @@ HTML file (index.html), zero dependencies, deployed via GitHub Pages.
   unknown algs fall back to "name match only" labelling
 - "Load demo chains" generates two multi-branch ECDSA PKIs in-browser
   (root, two intermediates, device/web/www leaves incl. an expired and
-  a soon-expiring one, plus device private keys) with a minimal DER
+  a soon-expiring one, plus device private keys; Alpha's TLS CA is
+  itself expired, propagating an expired-issuer warning to its valid
+  www leaf) with a minimal DER
   writer; Alpha's root is also cross-signed by Beta's root to demo
   cross-sign handling
 - Private keys (PKCS#8 / PKCS#1 / SEC1, PEM or DER) are parsed locally

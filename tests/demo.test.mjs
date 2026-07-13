@@ -27,6 +27,11 @@ const now = new Date(), soon = new Date(Date.now() + 30 * 864e5);
 check(byCN("device-002.alpha.demo").notAfter < now, "device-002 expired");
 const web = byCN("web.beta.demo");
 check(web.notAfter > now && web.notAfter < soon, "web cert in the expiring-soon window");
+// Alpha's TLS CA is expired; its www leaf link must carry the expired-issuer warning
+const tlsCA = byCN("Alpha Corp TLS CA");
+check(tlsCA.notAfter < now, "Alpha TLS CA expired");
+const wwwLink = f.links.get(byCN("www.alpha.demo").id);
+check(wwwLink?.warns?.some(w => /issuer expired/.test(w)), "www.alpha leaf flags expired issuer");
 
 // keys attach to device-001 leaves only
 check(certs.every(c => keys.some(k => k.pubId === c.pubId) === /^device-001\./.test(c.subject.map.CN)),
